@@ -1,26 +1,27 @@
 // Package daemon runs the long-lived half of esb: the loopback alias, the DNS
-// server for *.<domain>, Caddy on 443, and the unix-socket API the CLI drives.
+// server for *.<domain>, Caddy on 443, and the gRPC API over a unix socket
+// that the CLI drives.
 package daemon
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"net"
-	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"sync"
 	"syscall"
-	"time"
 
 	"github.com/caddyserver/caddy/v2"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/hawkbawk/esb/internal/api"
+	"github.com/hawkbawk/esb/internal/api/esbv1"
 	"github.com/hawkbawk/esb/internal/config"
 	"github.com/hawkbawk/esb/internal/dnsd"
 	"github.com/hawkbawk/esb/internal/netalias"
@@ -29,6 +30,8 @@ import (
 )
 
 type Daemon struct {
+	esbv1.UnimplementedRouteServiceServer
+
 	cfg   *config.Config
 	store *route.Store
 
@@ -85,9 +88,10 @@ func Run(cfg *config.Config) error {
 	if err != nil {
 		return err
 	}
-	srv := &http.Server{Handler: d.routes()}
+	srv := grpc.NewServer()
+	esbv1.RegisterRouteServiceServer(srv, d)
 	go func() {
-		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
 			log.Printf("esb: api server: %v", err)
 		}
 	}()
@@ -100,9 +104,7 @@ func Run(cfg *config.Config) error {
 	<-sig
 	log.Print("esb: shutting down")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_ = srv.Shutdown(ctx)
+	srv.GracefulStop()
 	return proxy.Stop()
 }
 
@@ -130,67 +132,53 @@ func (d *Daemon) listen() (net.Listener, error) {
 	return ln, nil
 }
 
-func (d *Daemon) routes() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /routes", d.handleList)
-	mux.HandleFunc("POST /routes", d.handleUpsert)
-	mux.HandleFunc("DELETE /routes/{label}", d.handleRemove)
-	return mux
-}
-
-func (d *Daemon) handleList(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, d.store.List())
-}
-
-func (d *Daemon) handleUpsert(w http.ResponseWriter, r *http.Request) {
-	var req api.RouteRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+func (d *Daemon) ListRoutes(_ context.Context, _ *esbv1.ListRoutesRequest) (*esbv1.ListRoutesResponse, error) {
+	stored := d.store.List()
+	routes := make([]*esbv1.Route, 0, len(stored))
+	for _, r := range stored {
+		routes = append(routes, api.ToProto(r))
 	}
+	return &esbv1.ListRoutesResponse{Routes: routes}, nil
+}
 
-	label := route.Sanitize(req.Label)
+func (d *Daemon) UpsertRoute(_ context.Context, req *esbv1.UpsertRouteRequest) (*esbv1.UpsertRouteResponse, error) {
+	label := route.Sanitize(req.GetLabel())
 	if label == "" {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("%q does not sanitise to a usable hostname label", req.Label))
-		return
+		return nil, status.Errorf(codes.InvalidArgument, "%q does not sanitise to a usable hostname label", req.GetLabel())
 	}
-	if req.SandboxPort < 1 || req.SandboxPort > 65535 {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("sandbox port %d out of range", req.SandboxPort))
-		return
+	port := req.GetSandboxPort()
+	if port < 1 || port > 65535 {
+		return nil, status.Errorf(codes.InvalidArgument, "sandbox port %d out of range", port)
 	}
 
 	d.applyMu.Lock()
 	defer d.applyMu.Unlock()
 
-	rt, err := d.store.Upsert(label, req.SandboxPort, d.cfg.PortMin, d.cfg.PortMax)
+	rt, err := d.store.Upsert(label, int(port), d.cfg.PortMin, d.cfg.PortMax)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return nil, status.Error(codes.Internal, err.Error())
 	}
 	if err := d.applyLocked(); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return nil, status.Error(codes.Internal, err.Error())
 	}
-	writeJSON(w, http.StatusOK, rt)
+	return &esbv1.UpsertRouteResponse{Route: api.ToProto(rt)}, nil
 }
 
-func (d *Daemon) handleRemove(w http.ResponseWriter, r *http.Request) {
-	label := route.Sanitize(r.PathValue("label"))
+// RemoveRoute tolerates a label with no route: `esb down` should still tear
+// the sandbox down when only the route is already gone.
+func (d *Daemon) RemoveRoute(_ context.Context, req *esbv1.RemoveRouteRequest) (*esbv1.RemoveRouteResponse, error) {
+	label := route.Sanitize(req.GetLabel())
 
 	d.applyMu.Lock()
 	defer d.applyMu.Unlock()
 
-	// Removing a label with no route is not an error: `esb down` should still
-	// tear the sandbox down when only the route is already gone.
 	if _, err := d.store.Remove(label); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return nil, status.Error(codes.Internal, err.Error())
 	}
 	if err := d.applyLocked(); err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
+		return nil, status.Error(codes.Internal, err.Error())
 	}
-	w.WriteHeader(http.StatusNoContent)
+	return &esbv1.RemoveRouteResponse{}, nil
 }
 
 func (d *Daemon) apply() error {
@@ -201,14 +189,4 @@ func (d *Daemon) apply() error {
 
 func (d *Daemon) applyLocked() error {
 	return proxy.Apply(d.cfg, d.store.List())
-}
-
-func writeJSON(w http.ResponseWriter, status int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func writeError(w http.ResponseWriter, status int, err error) {
-	writeJSON(w, status, map[string]string{"error": strings.TrimSpace(err.Error())})
 }

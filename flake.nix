@@ -38,6 +38,13 @@
             pkgs.gopls
             pkgs.go-tools
             pkgs.nixfmt
+
+            # For `go generate ./...`, which regenerates the daemon API stubs
+            # from proto/esb/v1/esb.proto. The generated .pb.go files are
+            # checked in, so a plain `nix build` never needs these.
+            pkgs.protobuf
+            pkgs.protoc-gen-go
+            pkgs.protoc-gen-go-grpc
           ];
         };
       });

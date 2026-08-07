@@ -55,5 +55,9 @@ func load() (*config.Config, *api.Client, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	return cfg, api.NewClient(cfg.SocketPath()), nil
+	client, err := api.NewClient(cfg.SocketPath())
+	if err != nil {
+		return nil, nil, err
+	}
+	return cfg, client, nil
 }

@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+// Package esb.v1 is the wire between the esb CLI and the esb daemon.
+//
+// The daemon owns the route table and the Caddy config; the CLI only asks it
+// for changes. That is why `esb up` needs no sudo and why there is no shared
+// directory of config fragments for the two halves to disagree about.
+package esb.v1;
+
+option go_package = "github.com/hawkbawk/esb/internal/api/esbv1;esbv1";
+
+// Route is one sandbox reachable at https://<label>.<domain>.
+message Route {
+  string label = 1;
+  // host_port is bound on 127.0.0.1 by the sandbox runtime.
+  uint32 host_port = 2;
+  // sandbox_port is the port the app listens on inside the microVM.
+  uint32 sandbox_port = 3;
+}
+
+message ListRoutesRequest {}
+
+message ListRoutesResponse {
+  repeated Route routes = 1;
+}
+
+// UpsertRouteRequest asks the daemon to route a label. The daemon picks the
+// host port, because only it knows which ports its other routes already hold.
+message UpsertRouteRequest {
+  string label = 1;
+  uint32 sandbox_port = 2;
+}
+
+message UpsertRouteResponse {
+  Route route = 1;
+}
+
+message RemoveRouteRequest {
+  string label = 1;
+}
+
+message RemoveRouteResponse {}
+
+service RouteService {
+  rpc ListRoutes(ListRoutesRequest) returns (ListRoutesResponse);
+  rpc UpsertRoute(UpsertRouteRequest) returns (UpsertRouteResponse);
+  // RemoveRoute succeeds even when the label has no route: `esb down` should
+  // still tear the sandbox down when only the route is already gone.
+  rpc RemoveRoute(RemoveRouteRequest) returns (RemoveRouteResponse);
+}

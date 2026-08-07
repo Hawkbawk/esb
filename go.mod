@@ -7,6 +7,8 @@ require (
 	github.com/caddyserver/caddy/v2 v2.10.2
 	github.com/miekg/dns v1.1.72
 	github.com/spf13/cobra v1.9.1
+	google.golang.org/grpc v1.73.0
+	google.golang.org/protobuf v1.36.11
 )
 
 require (
@@ -149,9 +151,7 @@ require (
 	google.golang.org/api v0.240.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20250603155806-513f23925822 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250603155806-513f23925822 // indirect
-	google.golang.org/grpc v1.73.0 // indirect
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.5.1 // indirect
-	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	howett.net/plist v1.0.0 // indirect
