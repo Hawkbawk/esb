@@ -1,13 +1,18 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/docker/docker/api/types/build"
+	"github.com/docker/docker/client"
+	"github.com/docker/docker/pkg/jsonmessage"
+	archive "github.com/moby/go-archive"
 	"github.com/spf13/cobra"
 
 	"github.com/hawkbawk/esb/internal/project"
@@ -64,17 +69,34 @@ or an OCI reference.
 
 // builtImageID returns the short (12-hex-char) image ID docker assigned to
 // ref, matching the form docker sandbox reports in `sbx template ls --json`.
-func builtImageID(ref string) (string, error) {
-	out, err := exec.Command("docker", "image", "inspect", ref, "--format", "{{.Id}}").Output()
+func builtImageID(ctx context.Context, cli *client.Client, ref string) (string, error) {
+	inspect, err := cli.ImageInspect(ctx, ref)
 	if err != nil {
 		return "", fmt.Errorf("docker image inspect %s: %w", ref, err)
 	}
-	id := strings.TrimSpace(string(out))
-	id = strings.TrimPrefix(id, "sha256:")
+	id := strings.TrimPrefix(inspect.ID, "sha256:")
 	if len(id) > 12 {
 		id = id[:12]
 	}
 	return id, nil
+}
+
+// saveImage writes ref to tarPath in the same format as `docker save -o`.
+func saveImage(ctx context.Context, cli *client.Client, ref, tarPath string) error {
+	rc, err := cli.ImageSave(ctx, []string{ref})
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+
+	f, err := os.Create(tarPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	_, err = io.Copy(f, rc)
+	return err
 }
 
 // runFromTemplate builds a Docker Sandbox template image from dir's
@@ -113,28 +135,53 @@ func runFromTemplate(dir, tag, port, name, workspace, agent string, buildArgs, c
 		sandboxName = baseName
 	}
 
-	run := func(bin string, argv ...string) error {
-		if verbose {
-			fmt.Fprintf(os.Stderr, "+ %s %s\n", bin, strings.Join(argv, " "))
+	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		return fmt.Errorf("connecting to docker: %w", err)
+	}
+	defer cli.Close()
+
+	ctx := context.Background()
+
+	dockerfileRel, err := filepath.Rel(parentDir, dockerfile)
+	if err != nil {
+		return err
+	}
+
+	buildArgMap := make(map[string]*string, len(buildArgs))
+	for _, arg := range buildArgs {
+		k, v, ok := strings.Cut(arg, "=")
+		if !ok {
+			return fmt.Errorf("--build-arg %q must be in KEY=VALUE form", arg)
 		}
-		c := exec.Command(bin, argv...)
-		c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
-		return c.Run()
+		buildArgMap[k] = &v
 	}
 
 	fmt.Printf("Building %s:%s (and :latest) from %s ...\n", templateTag, gitSHA, dockerfile)
-	build := []string{
-		"build", "-f", dockerfile,
-		"-t", templateTag + ":" + gitSHA,
-		"-t", templateTag + ":latest",
+	if verbose {
+		fmt.Fprintf(os.Stderr, "+ docker build -f %s -t %s:%s -t %s:latest %s\n", dockerfile, templateTag, gitSHA, templateTag, parentDir)
 	}
-	build = append(build, buildArgs...)
-	build = append(build, parentDir)
-	if err := run("docker", build...); err != nil {
+	buildCtx, err := archive.TarWithOptions(parentDir, &archive.TarOptions{})
+	if err != nil {
+		return fmt.Errorf("docker build: %w", err)
+	}
+	defer buildCtx.Close()
+
+	buildResp, err := cli.ImageBuild(ctx, buildCtx, build.ImageBuildOptions{
+		Dockerfile: dockerfileRel,
+		Tags:       []string{templateTag + ":" + gitSHA, templateTag + ":latest"},
+		BuildArgs:  buildArgMap,
+		Remove:     true,
+	})
+	if err != nil {
+		return fmt.Errorf("docker build: %w", err)
+	}
+	defer buildResp.Body.Close()
+	if err := jsonmessage.DisplayJSONMessagesStream(buildResp.Body, os.Stdout, os.Stdout.Fd(), false, nil); err != nil {
 		return fmt.Errorf("docker build: %w", err)
 	}
 
-	imageID, err := builtImageID(templateTag + ":latest")
+	imageID, err := builtImageID(ctx, cli, templateTag+":latest")
 	if err != nil {
 		return err
 	}
@@ -155,7 +202,10 @@ func runFromTemplate(dir, tag, port, name, workspace, agent string, buildArgs, c
 		tarPath := filepath.Join(tmpDir, templateTag+".tar")
 
 		fmt.Printf("Saving image to %s ...\n", tarPath)
-		if err := run("docker", "save", "-o", tarPath, templateTag+":latest"); err != nil {
+		if verbose {
+			fmt.Fprintf(os.Stderr, "+ docker save -o %s %s:latest\n", tarPath, templateTag)
+		}
+		if err := saveImage(ctx, cli, templateTag+":latest", tarPath); err != nil {
 			return fmt.Errorf("docker save: %w", err)
 		}
 

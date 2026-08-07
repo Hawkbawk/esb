@@ -24,15 +24,10 @@ func Caddyfile(cfg *config.Config, routes []route.Route) string {
 
 	fmt.Fprintf(&b, "*.%s {\n", cfg.Domain)
 
-	// Bind the dedicated alias only. Without this Caddy listens on 0.0.0.0:443
-	// and 0.0.0.0:80, which collides with OrbStack's existing wildcard binds on
-	// both ports. A specific-address bind coexists with a wildcard bind on
+	// A specific-address bind coexists with a wildcard bind on
 	// macOS; a wildcard-vs-wildcard bind does not.
 	fmt.Fprintf(&b, "\tbind %s\n\n", cfg.ListenAddress)
 
-	// The desec provider takes a block with a `token` subdirective; the shorter
-	// `dns desec <token>` form does not parse.
-	//
 	// The resolvers are load-bearing. /etc/resolver/<domain> sends every lookup
 	// under this domain to our own DNS server, which answers A records and
 	// nothing else, so the ACME TXT propagation check would never see the
@@ -45,9 +40,6 @@ func Caddyfile(cfg *config.Config, routes []route.Route) string {
 		fmt.Fprintf(&b, "\thandle @%s {\n", r.Label)
 		fmt.Fprintf(&b, "\t\treverse_proxy 127.0.0.1:%d {\n", r.HostPort)
 
-		// Canvas decides it is on HTTPS from this header. TLS terminates here
-		// at the proxy; the hop into the sandbox is plaintext, which is fine
-		// because LTI signing covers the URL and body, not the transport.
 		b.WriteString("\t\t\theader_up X-Forwarded-Proto https\n\t\t}\n\t}\n")
 	}
 

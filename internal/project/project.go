@@ -4,13 +4,12 @@
 package project
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
+
+	"github.com/go-git/go-git/v5"
 )
 
 // ConfigName is the per-repo config file, expected inside the sandbox
@@ -47,11 +46,14 @@ func LoadConfig(dir string) (*Config, error) {
 
 // GitShortSHA is the abbreviated HEAD of the repo containing dir.
 func GitShortSHA(dir string) (string, error) {
-	cmd := exec.Command("git", "-C", dir, "rev-parse", "--short", "HEAD")
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	if err := cmd.Run(); err != nil {
+	repo, err := git.PlainOpenWithOptions(dir, &git.PlainOpenOptions{DetectDotGit: true})
+	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(out.String()), nil
+	head, err := repo.Head()
+	if err != nil {
+		return "", err
+	}
+	hash := head.Hash().String()
+	return hash[:7], nil
 }

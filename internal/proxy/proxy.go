@@ -6,7 +6,9 @@
 package proxy
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"strings"
 
@@ -31,7 +33,13 @@ import (
 func LoadToken(cfg *config.Config) error {
 	data, err := os.ReadFile(cfg.TokenFile)
 	if err != nil {
-		return fmt.Errorf("reading deSEC token at %s: %w\nHas sops-nix decrypted it yet?", cfg.TokenFile, err)
+		if errors.Is(err, fs.ErrPermission) {
+			return fmt.Errorf("unable to read deSEC at %s due to missing permissions", cfg.TokenFile)
+		} else if errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("deSEC token file %s does not exist", cfg.TokenFile)
+		} else {
+			return fmt.Errorf("reading deSEC token at %s: %w", cfg.TokenFile, err)
+		}
 	}
 	token := strings.TrimSpace(string(data))
 	if token == "" {

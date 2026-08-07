@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 )
@@ -17,6 +18,8 @@ import (
 // DefaultPath is where the darwin module drops the generated config.
 const DefaultPath = "/etc/esb/config.json"
 
+// Config holds the host-wide esb settings. It should never be constructed
+// directly; use Load() instead.
 type Config struct {
 	// Domain that sandbox hostnames live directly under, so a sandbox
 	// labelled `canvas-foo` is reachable at `canvas-foo.<domain>`. Must be a
@@ -25,13 +28,11 @@ type Config struct {
 	Domain string `json:"domain"`
 
 	// ListenAddress is the loopback alias that `<label>.<domain>` resolves to
-	// and that Caddy binds 443 on. Deliberately not 192.168.255.254, which
-	// OrbStack already uses for its own domain routing.
+	// and that Caddy binds 443 on.
 	ListenAddress string `json:"listenAddress"`
 
 	// DNSPort is not 53, because /etc/resolver files can name a port and
-	// binding 53 would fight with everything else on the machine. Not 19321
-	// either, which OrbStack's resolver owns.
+	// binding 53 would fight with everything else on the machine.
 	DNSPort int `json:"dnsPort"`
 
 	StateDir  string `json:"stateDir"`
@@ -91,8 +92,8 @@ func Path() string {
 	if _, err := os.Stat(DefaultPath); err == nil {
 		return DefaultPath
 	}
-	if home, err := os.UserHomeDir(); err == nil {
-		return filepath.Join(home, ".config", "esb", "config.json")
+	if config, err := os.UserConfigDir(); err == nil {
+		return filepath.Join(config, "esb", "config.json")
 	}
 	return DefaultPath
 }
@@ -103,7 +104,7 @@ func Load() (*Config, error) {
 	path := Path()
 	data, err := os.ReadFile(path)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, fs.ErrNotExist) {
 			return nil, fmt.Errorf("no esb config at %s\nEnable services.esb in your nix-darwin configuration and rebuild, or set $ESB_CONFIG", path)
 		}
 		return nil, err
