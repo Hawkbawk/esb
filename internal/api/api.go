@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rhawk/esb/internal/route"
+	"github.com/hawkbawk/esb/internal/route"
 )
 
 // RouteRequest asks the daemon to route a label. The daemon picks the host

@@ -66,7 +66,7 @@ in
 
     domain = lib.mkOption {
       type = lib.types.str;
-      example = "sbx.rhawk.dedyn.io";
+      example = "sbx.hawkbawk.dedyn.io";
       description = ''
         Domain that sandbox hostnames live directly under, so a sandbox
         labelled `canvas-foo` is reachable at `canvas-foo.<domain>`. Must be a

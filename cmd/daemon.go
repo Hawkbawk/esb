@@ -5,10 +5,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/rhawk/esb/internal/config"
-	"github.com/rhawk/esb/internal/daemon"
-	"github.com/rhawk/esb/internal/proxy"
-	"github.com/rhawk/esb/internal/route"
+	"github.com/hawkbawk/esb/internal/config"
+	"github.com/hawkbawk/esb/internal/daemon"
+	"github.com/hawkbawk/esb/internal/proxy"
+	"github.com/hawkbawk/esb/internal/route"
 )
 
 func newDaemonCmd() *cobra.Command {

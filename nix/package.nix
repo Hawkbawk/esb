@@ -13,7 +13,7 @@ buildGoModule (finalAttrs: {
   ldflags = [
     "-s"
     "-w"
-    "-X=github.com/rhawk/esb/cmd.version=${finalAttrs.version}"
+    "-X=github.com/hawkbawk/esb/cmd.version=${finalAttrs.version}"
   ];
 
   # The Caddyfile adapter test is what proves the deSEC plugin is still wired
@@ -32,7 +32,7 @@ buildGoModule (finalAttrs: {
       DNS-01 provider and a minimal authoritative DNS server, so there is no
       separate Caddy build and no dnsmasq to install.
     '';
-    homepage = "https://github.com/rhawk/esb";
+    homepage = "https://github.com/hawkbawk/esb";
     license = lib.licenses.mit;
     mainProgram = "esb";
     platforms = lib.platforms.unix;

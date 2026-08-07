@@ -7,8 +7,8 @@ import (
 
 	"github.com/caddyserver/caddy/v2/caddyconfig"
 
-	"github.com/rhawk/esb/internal/config"
-	"github.com/rhawk/esb/internal/route"
+	"github.com/hawkbawk/esb/internal/config"
+	"github.com/hawkbawk/esb/internal/route"
 )
 
 func testConfig() *config.Config {

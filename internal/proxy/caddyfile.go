@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/rhawk/esb/internal/config"
-	"github.com/rhawk/esb/internal/route"
+	"github.com/hawkbawk/esb/internal/config"
+	"github.com/hawkbawk/esb/internal/route"
 )
 
 // Caddyfile renders the whole proxy config from the current route table.

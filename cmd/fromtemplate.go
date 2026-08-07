@@ -11,7 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/rhawk/esb/internal/sbx"
+	"github.com/hawkbawk/esb/internal/sbx"
 )
 
 func newFromTemplateCmd() *cobra.Command {

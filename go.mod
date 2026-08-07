@@ -1,4 +1,4 @@
-module github.com/rhawk/esb
+module github.com/hawkbawk/esb
 
 go 1.25
 

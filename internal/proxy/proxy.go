@@ -21,8 +21,8 @@ import (
 	// The deSEC DNS-01 solver, so `dns desec` resolves to a real module.
 	_ "github.com/caddy-dns/desec"
 
-	"github.com/rhawk/esb/internal/config"
-	"github.com/rhawk/esb/internal/route"
+	"github.com/hawkbawk/esb/internal/config"
+	"github.com/hawkbawk/esb/internal/route"
 )
 
 // LoadToken puts the deSEC API token in the environment, where the Caddyfile's

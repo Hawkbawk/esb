@@ -1,5 +1,5 @@
 package main
 
-import "github.com/rhawk/esb/cmd"
+import "github.com/hawkbawk/esb/cmd"
 
 func main() { cmd.Execute() }

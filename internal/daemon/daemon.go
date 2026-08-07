@@ -20,12 +20,12 @@ import (
 
 	"github.com/caddyserver/caddy/v2"
 
-	"github.com/rhawk/esb/internal/api"
-	"github.com/rhawk/esb/internal/config"
-	"github.com/rhawk/esb/internal/dnsd"
-	"github.com/rhawk/esb/internal/netalias"
-	"github.com/rhawk/esb/internal/proxy"
-	"github.com/rhawk/esb/internal/route"
+	"github.com/hawkbawk/esb/internal/api"
+	"github.com/hawkbawk/esb/internal/config"
+	"github.com/hawkbawk/esb/internal/dnsd"
+	"github.com/hawkbawk/esb/internal/netalias"
+	"github.com/hawkbawk/esb/internal/proxy"
+	"github.com/hawkbawk/esb/internal/route"
 )
 
 type Daemon struct {

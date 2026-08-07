@@ -62,7 +62,7 @@ Add the flake as an input:
 
 ```nix
 {
-  inputs.esb.url = "github:rhawk/esb";
+  inputs.esb.url = "github:hawkbawk/esb";
 }
 ```
 

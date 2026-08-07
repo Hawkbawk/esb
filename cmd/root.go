@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/rhawk/esb/internal/api"
-	"github.com/rhawk/esb/internal/config"
+	"github.com/hawkbawk/esb/internal/api"
+	"github.com/hawkbawk/esb/internal/config"
 )
 
 // version is set at build time via -ldflags.

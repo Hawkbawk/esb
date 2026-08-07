@@ -5,8 +5,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/rhawk/esb/internal/route"
-	"github.com/rhawk/esb/internal/sbx"
+	"github.com/hawkbawk/esb/internal/route"
+	"github.com/hawkbawk/esb/internal/sbx"
 )
 
 func newDownCmd() *cobra.Command {
