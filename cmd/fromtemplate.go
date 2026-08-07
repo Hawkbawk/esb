@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/hawkbawk/esb/internal/project"
 	"github.com/hawkbawk/esb/internal/sbx"
 )
 
@@ -32,111 +32,21 @@ func newFromTemplateCmd() *cobra.Command {
 		Long: `Build a Docker Sandbox template image straight from a repo's checked-in
 Dockerfile, load it, and create a sandbox from it in one shot.
 
-Expects a .docker-sandbox/ layout with a Dockerfile plus optional kit
-subfolders, each containing a spec.yaml. The directory defaults to
-.docker-sandbox in the current directory.`,
+Expects a .docker-sandbox/ layout with a Dockerfile in it. The directory
+defaults to .docker-sandbox in the current directory.
+
+An optional esb.json in that same directory lists the kits to pass to
+sbx create. Each entry is whatever --kit accepts: a local path, a URL,
+or an OCI reference.
+
+    {"kits": ["./my-kit", "docker/kit-node:latest"]}`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir := ".docker-sandbox"
 			if len(args) == 1 {
 				dir = args[0]
 			}
-
-			info, err := os.Stat(dir)
-			if err != nil || !info.IsDir() {
-				return fmt.Errorf("directory %q not found", dir)
-			}
-			dockerfile := filepath.Join(dir, "Dockerfile")
-			if _, err := os.Stat(dockerfile); err != nil {
-				return fmt.Errorf("no Dockerfile at %q\nfrom-template expects a Dockerfile directly inside the given directory", dockerfile)
-			}
-
-			absDir, err := filepath.Abs(dir)
-			if err != nil {
-				return err
-			}
-			parentDir := filepath.Dir(absDir)
-
-			baseName := tag
-			if baseName == "" {
-				baseName = filepath.Base(parentDir)
-			}
-			templateTag := baseName + "-sandbox-template"
-
-			// The image tag is pinned to the commit, so a rebuild after a
-			// Dockerfile change is visibly a different image.
-			gitSHA, err := gitShortSHA(parentDir)
-			if err != nil {
-				return fmt.Errorf("%q is not a git repository (needed to derive the image tag)", parentDir)
-			}
-
-			sandboxName := name
-			if sandboxName == "" {
-				sandboxName = baseName
-			}
-
-			run := func(bin string, argv ...string) error {
-				if verbose {
-					fmt.Fprintf(os.Stderr, "+ %s %s\n", bin, strings.Join(argv, " "))
-				}
-				c := exec.Command(bin, argv...)
-				c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
-				return c.Run()
-			}
-
-			fmt.Printf("Building %s:%s (and :latest) from %s ...\n", templateTag, gitSHA, dockerfile)
-			build := []string{
-				"build", "-f", dockerfile,
-				"-t", templateTag + ":" + gitSHA,
-				"-t", templateTag + ":latest",
-			}
-			build = append(build, buildArgs...)
-			build = append(build, parentDir)
-			if err := run("docker", build...); err != nil {
-				return fmt.Errorf("docker build: %w", err)
-			}
-
-			tmpDir, err := os.MkdirTemp("", "esb-template-")
-			if err != nil {
-				return err
-			}
-			defer os.RemoveAll(tmpDir)
-			tarPath := filepath.Join(tmpDir, templateTag+".tar")
-
-			fmt.Printf("Saving image to %s ...\n", tarPath)
-			if err := run("docker", "save", "-o", tarPath, templateTag+":latest"); err != nil {
-				return fmt.Errorf("docker save: %w", err)
-			}
-
-			fmt.Println("Loading template into docker sandbox ...")
-			if err := sbx.Run("template", "load", tarPath); err != nil {
-				return err
-			}
-
-			kits, err := discoverKits(dir)
-			if err != nil {
-				return err
-			}
-
-			fmt.Printf("Creating sandbox %q from template %q ...\n", sandboxName, templateTag)
-			create := []string{"create", "--clone", "--template", templateTag, "--name", sandboxName}
-			for _, kit := range kits {
-				create = append(create, "--kit", kit)
-			}
-			create = append(create, createArgs...)
-			create = append(create, agent, workspace)
-			if err := sbx.Run(create...); err != nil {
-				return err
-			}
-
-			if port == "" {
-				return nil
-			}
-			sandboxPort, err := strconv.Atoi(port)
-			if err != nil {
-				return fmt.Errorf("port %q is not a number", port)
-			}
-			return routeExisting(sandboxName, sandboxPort)
+			return runFromTemplate(dir, tag, port, name, workspace, agent, buildArgs, createArgs, verbose)
 		},
 	}
 
@@ -152,50 +62,131 @@ subfolders, each containing a spec.yaml. The directory defaults to
 	return cmd
 }
 
-// discoverKits finds every immediate subdirectory holding a spec.yaml.
-func discoverKits(dir string) ([]string, error) {
-	entries, err := os.ReadDir(dir)
+// builtImageID returns the short (12-hex-char) image ID docker assigned to
+// ref, matching the form docker sandbox reports in `sbx template ls --json`.
+func builtImageID(ref string) (string, error) {
+	out, err := exec.Command("docker", "image", "inspect", ref, "--format", "{{.Id}}").Output()
 	if err != nil {
-		return nil, err
+		return "", fmt.Errorf("docker image inspect %s: %w", ref, err)
 	}
-
-	var kits []string
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		kit := filepath.Join(dir, e.Name())
-		if _, err := os.Stat(filepath.Join(kit, "spec.yaml")); err == nil {
-			kits = append(kits, kit)
-		}
+	id := strings.TrimSpace(string(out))
+	id = strings.TrimPrefix(id, "sha256:")
+	if len(id) > 12 {
+		id = id[:12]
 	}
-	return kits, nil
+	return id, nil
 }
 
-func gitShortSHA(dir string) (string, error) {
-	cmd := exec.Command("git", "-C", dir, "rev-parse", "--short", "HEAD")
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	if err := cmd.Run(); err != nil {
-		return "", err
+// runFromTemplate builds a Docker Sandbox template image from dir's
+// Dockerfile, loads it, and creates a sandbox from it.
+func runFromTemplate(dir, tag, port, name, workspace, agent string, buildArgs, createArgs []string, verbose bool) error {
+	info, err := os.Stat(dir)
+	if err != nil || !info.IsDir() {
+		return fmt.Errorf("directory %q not found", dir)
 	}
-	return strings.TrimSpace(out.String()), nil
-}
+	dockerfile := filepath.Join(dir, "Dockerfile")
+	if _, err := os.Stat(dockerfile); err != nil {
+		return fmt.Errorf("no Dockerfile at %q\nfrom-template expects a Dockerfile directly inside the given directory", dockerfile)
+	}
 
-// routeExisting mirrors `esb route` for a sandbox this command just created.
-func routeExisting(label string, sandboxPort int) error {
-	cfg, client, err := load()
+	absDir, err := filepath.Abs(dir)
 	if err != nil {
 		return err
 	}
-	rt, err := client.Upsert(label, sandboxPort)
+	parentDir := filepath.Dir(absDir)
+
+	baseName := tag
+	if baseName == "" {
+		baseName = filepath.Base(parentDir)
+	}
+	templateTag := baseName + "-sandbox-template"
+
+	// The image tag is pinned to the commit, so a rebuild after a
+	// Dockerfile change is visibly a different image.
+	gitSHA, err := project.GitShortSHA(parentDir)
+	if err != nil {
+		return fmt.Errorf("%q is not a git repository (needed to derive the image tag)", parentDir)
+	}
+
+	sandboxName := name
+	if sandboxName == "" {
+		sandboxName = baseName
+	}
+
+	run := func(bin string, argv ...string) error {
+		if verbose {
+			fmt.Fprintf(os.Stderr, "+ %s %s\n", bin, strings.Join(argv, " "))
+		}
+		c := exec.Command(bin, argv...)
+		c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
+		return c.Run()
+	}
+
+	fmt.Printf("Building %s:%s (and :latest) from %s ...\n", templateTag, gitSHA, dockerfile)
+	build := []string{
+		"build", "-f", dockerfile,
+		"-t", templateTag + ":" + gitSHA,
+		"-t", templateTag + ":latest",
+	}
+	build = append(build, buildArgs...)
+	build = append(build, parentDir)
+	if err := run("docker", build...); err != nil {
+		return fmt.Errorf("docker build: %w", err)
+	}
+
+	imageID, err := builtImageID(templateTag + ":latest")
 	if err != nil {
 		return err
 	}
-	if err := sbx.Run("ports", label, "--publish",
-		fmt.Sprintf("127.0.0.1:%d:%d", rt.HostPort, sandboxPort)); err != nil {
+
+	alreadyLoaded, err := sbx.HasTemplateImage(imageID)
+	if err != nil {
 		return err
 	}
-	fmt.Printf("https://%s.%s -> 127.0.0.1:%d -> %d\n", label, cfg.Domain, rt.HostPort, sandboxPort)
-	return nil
+
+	if alreadyLoaded {
+		fmt.Printf("Template image %s is already loaded into docker sandbox, skipping save/load ...\n", imageID)
+	} else {
+		tmpDir, err := os.MkdirTemp("", "esb-template-")
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(tmpDir)
+		tarPath := filepath.Join(tmpDir, templateTag+".tar")
+
+		fmt.Printf("Saving image to %s ...\n", tarPath)
+		if err := run("docker", "save", "-o", tarPath, templateTag+":latest"); err != nil {
+			return fmt.Errorf("docker save: %w", err)
+		}
+
+		fmt.Println("Loading template into docker sandbox ...")
+		if err := sbx.Run("template", "load", tarPath); err != nil {
+			return err
+		}
+	}
+
+	proj, err := project.LoadConfig(dir)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Creating sandbox %q from template %q ...\n", sandboxName, templateTag)
+	create := []string{"create", "--clone", "--template", templateTag, "--name", sandboxName}
+	for _, kit := range proj.Kits {
+		create = append(create, "--kit", kit)
+	}
+	create = append(create, createArgs...)
+	create = append(create, agent, workspace)
+	if err := sbx.Run(create...); err != nil {
+		return err
+	}
+
+	if port == "" {
+		return nil
+	}
+	sandboxPort, err := strconv.Atoi(port)
+	if err != nil {
+		return fmt.Errorf("port %q is not a number", port)
+	}
+	return RouteSandbox(sandboxName, sandboxPort)
 }
