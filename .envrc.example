@@ -1,0 +1,13 @@
+# Copy to .envrc and run `direnv allow`. The real .envrc is gitignored, so
+# anything you add here stays local to your checkout.
+#
+# Drops you into the devShell from flake.nix: go, gopls, staticcheck, and
+# nixfmt.
+#
+# Optional: add the nix-direnv package to cache the evaluated shell. Without
+# it this still works, it just re-evaluates the flake on the first `cd` after
+# any change to the watched files below.
+use flake
+
+# Keep the shell from being rebuilt on unrelated edits.
+watch_file flake.nix nix/package.nix
