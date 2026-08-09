@@ -64,7 +64,7 @@ the correct order.
 	f.StringVarP(&name, "name", "n", "", "sandbox name (default: the template base name)")
 	f.StringVarP(&workspace, "workspace", "w", ".", "workspace path passed to sbx create")
 	f.StringVarP(&agent, "agent", "a", "claude", "agent to start in the sandbox")
-	f.StringVarP(&agentPrompt, "agent-prompt", "P", "", "prompt to pass to the agent (or piped via stdin); if set, runs the agent in the background once the sandbox is created")
+	f.StringVarP(&agentPrompt, "agent-prompt", "P", "", "prompt to pass to the agent (or piped via stdin); if set, runs the agent in the background once the sandbox is created. NOTE: Only works with Claude Code. Use `claude agents` inside the sandbox to reconnect")
 	f.StringArrayVarP(&buildArgs, "build-arg", "b", nil, "extra argument for docker build (repeatable)")
 	f.StringArrayVarP(&createArgs, "create-arg", "c", nil, "extra argument for sbx create (repeatable)")
 	f.BoolVarP(&verbose, "verbose", "v", false, "echo the commands being run")
@@ -157,11 +157,6 @@ func runFromTemplate(dir, tag, port, name, workspace, agent, agentPrompt string,
 
 	ctx := context.Background()
 
-	dockerfileRel, err := filepath.Rel(parentDir, dockerfile)
-	if err != nil {
-		return err
-	}
-
 	buildArgMap := make(map[string]*string, len(buildArgs))
 	for _, arg := range buildArgs {
 		k, v, ok := strings.Cut(arg, "=")
@@ -182,7 +177,7 @@ func runFromTemplate(dir, tag, port, name, workspace, agent, agentPrompt string,
 	defer buildCtx.Close()
 
 	buildResp, err := cli.ImageBuild(ctx, buildCtx, build.ImageBuildOptions{
-		Dockerfile: dockerfileRel,
+		Dockerfile: dockerfile,
 		Tags:       []string{templateTag + ":" + gitSHA, templateTag + ":latest"},
 		BuildArgs:  buildArgMap,
 		Remove:     true,
