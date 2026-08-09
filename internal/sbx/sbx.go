@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 )
 
@@ -102,10 +103,8 @@ func Exists(name string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	for _, n := range names {
-		if n == name {
-			return true, nil
-		}
+	if slices.Contains(names, name) {
+		return true, nil
 	}
 	return false, nil
 }

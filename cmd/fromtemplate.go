@@ -39,8 +39,8 @@ func newFromTemplateCmd() *cobra.Command {
 		Long: `Build a Docker Sandbox template image straight from a repo's checked-in
 Dockerfile, load it, and create a sandbox from it in one shot.
 
-Expects a .docker-sandbox/ layout with a Dockerfile in it. The directory
-defaults to .docker-sandbox in the current directory.
+Expects a .esb/ layout with a Dockerfile in it. The directory defaults to
+.esb in the current directory.
 
 An optional esb.json in that same directory lists the kits to pass to
 sbx create. Each entry is whatever --kit accepts: a local path, a URL,
@@ -52,10 +52,19 @@ esb.json can also set "dockerfile" to use a Dockerfile other than the one
 directly inside the given directory. It's either a path relative to the repo
 root (the CWD from-template is expected to be run from) or an absolute path.
 
-    {"kits": ["./my-kit", "docker/kit-node:latest"], "dockerfile": "docker/Dockerfile.sandbox"}`,
+Example:
+
+{"kits": ["./my-kit", "docker/kit-node:latest"], "dockerfile": "docker/Dockerfile.sandbox"}
+
+A WORKSPACE_DIR build argument is always sent to the Docker build process. This can be used
+to set the working directory inside the Docker container to match the same workspace location
+that Docker Sandbox will use, which is always the absolute path to the repository root on the
+host machine.
+
+    `,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			dir := ".docker-sandbox"
+			dir := ".esb"
 			if len(args) == 1 {
 				dir = args[0]
 			}
@@ -174,7 +183,7 @@ func runFromTemplate(dir, tag, port, name, workspace, agent, agentPrompt string,
 
 	ctx := context.Background()
 
-	buildArgMap := make(map[string]*string, len(buildArgs))
+	buildArgMap := make(map[string]*string, len(buildArgs)+1)
 	for _, arg := range buildArgs {
 		k, v, ok := strings.Cut(arg, "=")
 		if !ok {
@@ -182,6 +191,8 @@ func runFromTemplate(dir, tag, port, name, workspace, agent, agentPrompt string,
 		}
 		buildArgMap[k] = &v
 	}
+	// Users can use this
+	buildArgMap["WORKSPACE_DIR"] = &parentDir
 
 	fmt.Printf("Building %s:%s (and :latest) from %s ...\n", templateTag, gitSHA, dockerfile)
 	if verbose {
