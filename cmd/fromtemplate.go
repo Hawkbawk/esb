@@ -21,14 +21,15 @@ import (
 
 func newFromTemplateCmd() *cobra.Command {
 	var (
-		tag        string
-		port       string
-		name       string
-		workspace  string
-		agent      string
-		buildArgs  []string
-		createArgs []string
-		verbose    bool
+		tag         string
+		port        string
+		name        string
+		workspace   string
+		agent       string
+		agentPrompt string
+		buildArgs   []string
+		createArgs  []string
+		verbose     bool
 	)
 
 	cmd := &cobra.Command{
@@ -42,7 +43,9 @@ defaults to .docker-sandbox in the current directory.
 
 An optional esb.json in that same directory lists the kits to pass to
 sbx create. Each entry is whatever --kit accepts: a local path, a URL,
-or an OCI reference.
+or an OCI reference. The ordering of kits is important. If one kit depends on another,
+its dependencies must be listed before it to ensure the install and setup scripts run in
+the correct order.
 
     {"kits": ["./my-kit", "docker/kit-node:latest"]}`,
 		Args: cobra.MaximumNArgs(1),
@@ -51,7 +54,7 @@ or an OCI reference.
 			if len(args) == 1 {
 				dir = args[0]
 			}
-			return runFromTemplate(dir, tag, port, name, workspace, agent, buildArgs, createArgs, verbose)
+			return runFromTemplate(dir, tag, port, name, workspace, agent, agentPrompt, buildArgs, createArgs, verbose)
 		},
 	}
 
@@ -61,6 +64,7 @@ or an OCI reference.
 	f.StringVarP(&name, "name", "n", "", "sandbox name (default: the template base name)")
 	f.StringVarP(&workspace, "workspace", "w", ".", "workspace path passed to sbx create")
 	f.StringVarP(&agent, "agent", "a", "claude", "agent to start in the sandbox")
+	f.StringVarP(&agentPrompt, "agent-prompt", "P", "", "prompt to pass to the agent (or piped via stdin); if set, runs the agent in the background once the sandbox is created")
 	f.StringArrayVarP(&buildArgs, "build-arg", "b", nil, "extra argument for docker build (repeatable)")
 	f.StringArrayVarP(&createArgs, "create-arg", "c", nil, "extra argument for sbx create (repeatable)")
 	f.BoolVarP(&verbose, "verbose", "v", false, "echo the commands being run")
@@ -101,7 +105,17 @@ func saveImage(ctx context.Context, cli *client.Client, ref, tarPath string) err
 
 // runFromTemplate builds a Docker Sandbox template image from dir's
 // Dockerfile, loads it, and creates a sandbox from it.
-func runFromTemplate(dir, tag, port, name, workspace, agent string, buildArgs, createArgs []string, verbose bool) error {
+func runFromTemplate(dir, tag, port, name, workspace, agent, agentPrompt string, buildArgs, createArgs []string, verbose bool) error {
+	if agentPrompt == "" {
+		if stat, err := os.Stdin.Stat(); err == nil && stat.Mode()&os.ModeCharDevice == 0 {
+			piped, err := io.ReadAll(os.Stdin)
+			if err != nil {
+				return fmt.Errorf("reading agent prompt from stdin: %w", err)
+			}
+			agentPrompt = strings.TrimSpace(string(piped))
+		}
+	}
+
 	info, err := os.Stat(dir)
 	if err != nil || !info.IsDir() {
 		return fmt.Errorf("directory %q not found", dir)
@@ -231,6 +245,12 @@ func runFromTemplate(dir, tag, port, name, workspace, agent string, buildArgs, c
 		return err
 	}
 
+	if agentPrompt != "" {
+		if err := sbx.Run("run", "--name", sandboxName, "--", "--bg", agentPrompt); err != nil {
+			return err
+		}
+	}
+
 	if port == "" {
 		return nil
 	}
@@ -238,5 +258,5 @@ func runFromTemplate(dir, tag, port, name, workspace, agent string, buildArgs, c
 	if err != nil {
 		return fmt.Errorf("port %q is not a number", port)
 	}
-	return RouteSandbox(sandboxName, sandboxPort)
+	return RouteHost(sandboxName, sandboxName, sandboxPort)
 }

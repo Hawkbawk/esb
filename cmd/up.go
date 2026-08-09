@@ -55,7 +55,7 @@ agent does can touch your worktree.`,
 
 			// Reserve the route first: the host port has to be known before
 			// the sandbox is created, because it goes in --publish.
-			rt, err := client.Upsert(label, sandboxPort)
+			rt, err := client.Upsert(label, label, sandboxPort)
 			if err != nil {
 				return err
 			}
@@ -70,7 +70,7 @@ agent does can touch your worktree.`,
 
 			if err := sbx.Run(createArgs...); err != nil {
 				// Don't leave a route pointing at a sandbox that never existed.
-				_ = client.Remove(label)
+				_, _, _ = client.Remove(label)
 				return err
 			}
 

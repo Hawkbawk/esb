@@ -62,12 +62,13 @@ func (c *Client) List() ([]route.Route, error) {
 	return out, nil
 }
 
-func (c *Client) Upsert(label string, sandboxPort int) (route.Route, error) {
+func (c *Client) Upsert(host, sandbox string, sandboxPort int) (route.Route, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
 	defer cancel()
 
 	resp, err := c.routes.UpsertRoute(ctx, &esbv1.UpsertRouteRequest{
-		Label:       label,
+		Host:        host,
+		Sandbox:     sandbox,
 		SandboxPort: uint32(sandboxPort),
 	})
 	if err != nil {
@@ -76,12 +77,36 @@ func (c *Client) Upsert(label string, sandboxPort int) (route.Route, error) {
 	return FromProto(resp.GetRoute()), nil
 }
 
-func (c *Client) Remove(label string) error {
+// Remove removes host's route, if it has one, and reports whether it did.
+func (c *Client) Remove(host string) (route.Route, bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
 	defer cancel()
 
-	_, err := c.routes.RemoveRoute(ctx, &esbv1.RemoveRouteRequest{Label: label})
-	return callErr(err)
+	resp, err := c.routes.RemoveRoute(ctx, &esbv1.RemoveRouteRequest{Host: host})
+	if err != nil {
+		return route.Route{}, false, callErr(err)
+	}
+	if resp.GetRoute() == nil {
+		return route.Route{}, false, nil
+	}
+	return FromProto(resp.GetRoute()), true, nil
+}
+
+// RemoveSandbox removes every route pointing at sandbox, e.g. when the
+// sandbox itself is being destroyed.
+func (c *Client) RemoveSandbox(sandbox string) ([]route.Route, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
+	defer cancel()
+
+	resp, err := c.routes.RemoveSandboxRoutes(ctx, &esbv1.RemoveSandboxRoutesRequest{Sandbox: sandbox})
+	if err != nil {
+		return nil, callErr(err)
+	}
+	out := make([]route.Route, 0, len(resp.GetRoutes()))
+	for _, r := range resp.GetRoutes() {
+		out = append(out, FromProto(r))
+	}
+	return out, nil
 }
 
 // ToProto and FromProto keep route.Route as the type the rest of esb passes
@@ -89,7 +114,8 @@ func (c *Client) Remove(label string) error {
 // storage type would tie the on-disk format to the wire format.
 func ToProto(r route.Route) *esbv1.Route {
 	return &esbv1.Route{
-		Label:       r.Label,
+		Host:        r.Host,
+		Sandbox:     r.Sandbox,
 		HostPort:    uint32(r.HostPort),
 		SandboxPort: uint32(r.SandboxPort),
 	}
@@ -97,7 +123,8 @@ func ToProto(r route.Route) *esbv1.Route {
 
 func FromProto(r *esbv1.Route) route.Route {
 	return route.Route{
-		Label:       r.GetLabel(),
+		Host:        r.GetHost(),
+		Sandbox:     r.GetSandbox(),
 		HostPort:    int(r.GetHostPort()),
 		SandboxPort: int(r.GetSandboxPort()),
 	}

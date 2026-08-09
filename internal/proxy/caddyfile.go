@@ -36,8 +36,8 @@ func Caddyfile(cfg *config.Config, routes []route.Route) string {
 	b.WriteString("\ttls {\n\t\tdns desec {\n\t\t\ttoken {env.DESEC_TOKEN}\n\t\t}\n\t\tresolvers 1.1.1.1 9.9.9.9\n\t}\n")
 
 	for _, r := range routes {
-		fmt.Fprintf(&b, "\n\t@%s host %s.%s\n", r.Label, r.Label, cfg.Domain)
-		fmt.Fprintf(&b, "\thandle @%s {\n", r.Label)
+		fmt.Fprintf(&b, "\n\t@%s host %s.%s\n", r.Host, r.Host, cfg.Domain)
+		fmt.Fprintf(&b, "\thandle @%s {\n", r.Host)
 		fmt.Fprintf(&b, "\t\treverse_proxy 127.0.0.1:%d {\n", r.HostPort)
 
 		b.WriteString("\t\t\theader_up X-Forwarded-Proto https\n\t\t}\n\t}\n")

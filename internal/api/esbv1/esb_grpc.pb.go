@@ -25,9 +25,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	RouteService_ListRoutes_FullMethodName  = "/esb.v1.RouteService/ListRoutes"
-	RouteService_UpsertRoute_FullMethodName = "/esb.v1.RouteService/UpsertRoute"
-	RouteService_RemoveRoute_FullMethodName = "/esb.v1.RouteService/RemoveRoute"
+	RouteService_ListRoutes_FullMethodName          = "/esb.v1.RouteService/ListRoutes"
+	RouteService_UpsertRoute_FullMethodName         = "/esb.v1.RouteService/UpsertRoute"
+	RouteService_RemoveRoute_FullMethodName         = "/esb.v1.RouteService/RemoveRoute"
+	RouteService_RemoveSandboxRoutes_FullMethodName = "/esb.v1.RouteService/RemoveSandboxRoutes"
 )
 
 // RouteServiceClient is the client API for RouteService service.
@@ -36,9 +37,10 @@ const (
 type RouteServiceClient interface {
 	ListRoutes(ctx context.Context, in *ListRoutesRequest, opts ...grpc.CallOption) (*ListRoutesResponse, error)
 	UpsertRoute(ctx context.Context, in *UpsertRouteRequest, opts ...grpc.CallOption) (*UpsertRouteResponse, error)
-	// RemoveRoute succeeds even when the label has no route: `esb down` should
+	// RemoveRoute succeeds even when the host has no route: `esb down` should
 	// still tear the sandbox down when only the route is already gone.
 	RemoveRoute(ctx context.Context, in *RemoveRouteRequest, opts ...grpc.CallOption) (*RemoveRouteResponse, error)
+	RemoveSandboxRoutes(ctx context.Context, in *RemoveSandboxRoutesRequest, opts ...grpc.CallOption) (*RemoveSandboxRoutesResponse, error)
 }
 
 type routeServiceClient struct {
@@ -79,15 +81,26 @@ func (c *routeServiceClient) RemoveRoute(ctx context.Context, in *RemoveRouteReq
 	return out, nil
 }
 
+func (c *routeServiceClient) RemoveSandboxRoutes(ctx context.Context, in *RemoveSandboxRoutesRequest, opts ...grpc.CallOption) (*RemoveSandboxRoutesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RemoveSandboxRoutesResponse)
+	err := c.cc.Invoke(ctx, RouteService_RemoveSandboxRoutes_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RouteServiceServer is the server API for RouteService service.
 // All implementations must embed UnimplementedRouteServiceServer
 // for forward compatibility.
 type RouteServiceServer interface {
 	ListRoutes(context.Context, *ListRoutesRequest) (*ListRoutesResponse, error)
 	UpsertRoute(context.Context, *UpsertRouteRequest) (*UpsertRouteResponse, error)
-	// RemoveRoute succeeds even when the label has no route: `esb down` should
+	// RemoveRoute succeeds even when the host has no route: `esb down` should
 	// still tear the sandbox down when only the route is already gone.
 	RemoveRoute(context.Context, *RemoveRouteRequest) (*RemoveRouteResponse, error)
+	RemoveSandboxRoutes(context.Context, *RemoveSandboxRoutesRequest) (*RemoveSandboxRoutesResponse, error)
 	mustEmbedUnimplementedRouteServiceServer()
 }
 
@@ -106,6 +119,9 @@ func (UnimplementedRouteServiceServer) UpsertRoute(context.Context, *UpsertRoute
 }
 func (UnimplementedRouteServiceServer) RemoveRoute(context.Context, *RemoveRouteRequest) (*RemoveRouteResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RemoveRoute not implemented")
+}
+func (UnimplementedRouteServiceServer) RemoveSandboxRoutes(context.Context, *RemoveSandboxRoutesRequest) (*RemoveSandboxRoutesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RemoveSandboxRoutes not implemented")
 }
 func (UnimplementedRouteServiceServer) mustEmbedUnimplementedRouteServiceServer() {}
 func (UnimplementedRouteServiceServer) testEmbeddedByValue()                      {}
@@ -182,6 +198,24 @@ func _RouteService_RemoveRoute_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RouteService_RemoveSandboxRoutes_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RemoveSandboxRoutesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RouteServiceServer).RemoveSandboxRoutes(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RouteService_RemoveSandboxRoutes_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RouteServiceServer).RemoveSandboxRoutes(ctx, req.(*RemoveSandboxRoutesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // RouteService_ServiceDesc is the grpc.ServiceDesc for RouteService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -200,6 +234,10 @@ var RouteService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RemoveRoute",
 			Handler:    _RouteService_RemoveRoute_Handler,
+		},
+		{
+			MethodName: "RemoveSandboxRoutes",
+			Handler:    _RouteService_RemoveSandboxRoutes_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -142,9 +142,13 @@ func (d *Daemon) ListRoutes(_ context.Context, _ *esbv1.ListRoutesRequest) (*esb
 }
 
 func (d *Daemon) UpsertRoute(_ context.Context, req *esbv1.UpsertRouteRequest) (*esbv1.UpsertRouteResponse, error) {
-	label := route.Sanitize(req.GetLabel())
-	if label == "" {
-		return nil, status.Errorf(codes.InvalidArgument, "%q does not sanitise to a usable hostname label", req.GetLabel())
+	host := route.Sanitize(req.GetHost())
+	if host == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "%q does not sanitise to a usable hostname", req.GetHost())
+	}
+	sandbox := route.Sanitize(req.GetSandbox())
+	if sandbox == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "%q does not sanitise to a usable sandbox name", req.GetSandbox())
 	}
 	port := req.GetSandboxPort()
 	if port < 1 || port > 65535 {
@@ -154,7 +158,7 @@ func (d *Daemon) UpsertRoute(_ context.Context, req *esbv1.UpsertRouteRequest) (
 	d.applyMu.Lock()
 	defer d.applyMu.Unlock()
 
-	rt, err := d.store.Upsert(label, int(port), d.cfg.PortMin, d.cfg.PortMax)
+	rt, err := d.store.Upsert(host, sandbox, int(port), d.cfg.PortMin, d.cfg.PortMax)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
@@ -164,21 +168,47 @@ func (d *Daemon) UpsertRoute(_ context.Context, req *esbv1.UpsertRouteRequest) (
 	return &esbv1.UpsertRouteResponse{Route: api.ToProto(rt)}, nil
 }
 
-// RemoveRoute tolerates a label with no route: `esb down` should still tear
+// RemoveRoute tolerates a host with no route: `esb down` should still tear
 // the sandbox down when only the route is already gone.
 func (d *Daemon) RemoveRoute(_ context.Context, req *esbv1.RemoveRouteRequest) (*esbv1.RemoveRouteResponse, error) {
-	label := route.Sanitize(req.GetLabel())
+	host := route.Sanitize(req.GetHost())
 
 	d.applyMu.Lock()
 	defer d.applyMu.Unlock()
 
-	if _, err := d.store.Remove(label); err != nil {
+	rt, existed, err := d.store.Remove(host)
+	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 	if err := d.applyLocked(); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
-	return &esbv1.RemoveRouteResponse{}, nil
+	if !existed {
+		return &esbv1.RemoveRouteResponse{}, nil
+	}
+	return &esbv1.RemoveRouteResponse{Route: api.ToProto(rt)}, nil
+}
+
+// RemoveSandboxRoutes tolerates a sandbox with no routes, for the same reason
+// RemoveRoute does.
+func (d *Daemon) RemoveSandboxRoutes(_ context.Context, req *esbv1.RemoveSandboxRoutesRequest) (*esbv1.RemoveSandboxRoutesResponse, error) {
+	sandbox := route.Sanitize(req.GetSandbox())
+
+	d.applyMu.Lock()
+	defer d.applyMu.Unlock()
+
+	removed, err := d.store.RemoveSandbox(sandbox)
+	if err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+	if err := d.applyLocked(); err != nil {
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+	routes := make([]*esbv1.Route, 0, len(removed))
+	for _, r := range removed {
+		routes = append(routes, api.ToProto(r))
+	}
+	return &esbv1.RemoveSandboxRoutesResponse{Routes: routes}, nil
 }
 
 func (d *Daemon) apply() error {

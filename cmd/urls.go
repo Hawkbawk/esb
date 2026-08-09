@@ -30,10 +30,10 @@ func newURLsCmd() *cobra.Command {
 			}
 
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "LABEL\tHOST PORT\tSANDBOX PORT\tURL")
+			fmt.Fprintln(w, "HOST\tSANDBOX\tHOST PORT\tSANDBOX PORT\tURL")
 			for _, r := range routes {
-				fmt.Fprintf(w, "%s\t%d\t%d\thttps://%s.%s\n",
-					r.Label, r.HostPort, r.SandboxPort, r.Label, cfg.Domain)
+				fmt.Fprintf(w, "%s\t%s\t%d\t%d\thttps://%s.%s\n",
+					r.Host, r.Sandbox, r.HostPort, r.SandboxPort, r.Host, cfg.Domain)
 			}
 			return w.Flush()
 		},

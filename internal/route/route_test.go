@@ -24,7 +24,7 @@ func TestSanitize(t *testing.T) {
 }
 
 // A route file has to stay correct across sandbox restarts, so re-upserting a
-// label must never re-roll its host port.
+// host must never re-roll its host port.
 func TestUpsertReusesHostPort(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "routes.json")
 	store, err := NewStore(path)
@@ -32,11 +32,11 @@ func TestUpsertReusesHostPort(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	first, err := store.Upsert("canvas", 3000, 30000, 39999)
+	first, err := store.Upsert("canvas", "canvas", 3000, 30000, 39999)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := store.Upsert("canvas", 4000, 30000, 39999)
+	second, err := store.Upsert("canvas", "canvas", 4000, 30000, 39999)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,16 +65,78 @@ func TestUpsertAvoidsCollision(t *testing.T) {
 	}
 
 	seen := map[int]string{}
-	for _, label := range []string{"a", "b", "c", "d", "e", "f", "g", "h"} {
-		// A range narrow enough that the label hashes are very likely to
+	for _, host := range []string{"a", "b", "c", "d", "e", "f", "g", "h"} {
+		// A range narrow enough that the host hashes are very likely to
 		// collide, so the probe-upward path actually runs.
-		r, err := store.Upsert(label, 3000, 30000, 30015)
+		r, err := store.Upsert(host, host, 3000, 30000, 30015)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if other, ok := seen[r.HostPort]; ok {
-			t.Fatalf("port %d handed to both %q and %q", r.HostPort, other, label)
+			t.Fatalf("port %d handed to both %q and %q", r.HostPort, other, host)
 		}
-		seen[r.HostPort] = label
+		seen[r.HostPort] = host
+	}
+}
+
+// A multi-tenant sandbox routes several hostnames to the same sandbox port;
+// those routes must share one published host port rather than publishing the
+// same container port over and over.
+func TestUpsertSharesPortAcrossHostsOnSameSandboxPort(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "routes.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tenantA, err := store.Upsert("tenant-a", "multi-tenant", 3000, 30000, 39999)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenantB, err := store.Upsert("tenant-b", "multi-tenant", 3000, 30000, 39999)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tenantA.HostPort != tenantB.HostPort {
+		t.Errorf("routes for the same (sandbox, sandboxPort) got different host ports: %d vs %d",
+			tenantA.HostPort, tenantB.HostPort)
+	}
+
+	// A different sandbox port on the same sandbox still needs its own port.
+	other, err := store.Upsert("tenant-a-admin", "multi-tenant", 3001, 30000, 39999)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if other.HostPort == tenantA.HostPort {
+		t.Errorf("routes for different sandbox ports shared a host port: %d", other.HostPort)
+	}
+}
+
+func TestRemoveSandboxDropsAllItsHosts(t *testing.T) {
+	store, err := NewStore(filepath.Join(t.TempDir(), "routes.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := store.Upsert("tenant-a", "multi-tenant", 3000, 30000, 39999); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Upsert("tenant-b", "multi-tenant", 3000, 30000, 39999); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Upsert("other", "other-sandbox", 3000, 30000, 39999); err != nil {
+		t.Fatal(err)
+	}
+
+	removed, err := store.RemoveSandbox("multi-tenant")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(removed) != 2 {
+		t.Fatalf("removed %d routes, want 2: %+v", len(removed), removed)
+	}
+
+	remaining := store.List()
+	if len(remaining) != 1 || remaining[0].Host != "other" {
+		t.Errorf("route table after RemoveSandbox = %+v, want only %q", remaining, "other")
 	}
 }

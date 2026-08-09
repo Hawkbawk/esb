@@ -27,14 +27,22 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// Route is one sandbox reachable at https://<label>.<domain>.
+// Route is one hostname reachable at https://<host>.<domain>, forwarding to a
+// sandbox. A single sandbox can have many Routes (e.g. one per tenant in a
+// multi-tenant app that switches on Host), which is why the sandbox label is
+// carried on the route rather than being the route's key.
 type Route struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	Label string                 `protobuf:"bytes,1,opt,name=label,proto3" json:"label,omitempty"`
-	// host_port is bound on 127.0.0.1 by the sandbox runtime.
-	HostPort uint32 `protobuf:"varint,2,opt,name=host_port,json=hostPort,proto3" json:"host_port,omitempty"`
+	Host  string                 `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
+	// sandbox is the sbx sandbox name this route forwards to.
+	Sandbox string `protobuf:"bytes,2,opt,name=sandbox,proto3" json:"sandbox,omitempty"`
+	// host_port is bound on 127.0.0.1 by the sandbox runtime. Routes that
+	// share a (sandbox, sandbox_port) pair share a host_port too, so a
+	// multi-tenant sandbox doesn't get the same container port published
+	// more than once.
+	HostPort uint32 `protobuf:"varint,3,opt,name=host_port,json=hostPort,proto3" json:"host_port,omitempty"`
 	// sandbox_port is the port the app listens on inside the microVM.
-	SandboxPort   uint32 `protobuf:"varint,3,opt,name=sandbox_port,json=sandboxPort,proto3" json:"sandbox_port,omitempty"`
+	SandboxPort   uint32 `protobuf:"varint,4,opt,name=sandbox_port,json=sandboxPort,proto3" json:"sandbox_port,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -69,9 +77,16 @@ func (*Route) Descriptor() ([]byte, []int) {
 	return file_esb_v1_esb_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *Route) GetLabel() string {
+func (x *Route) GetHost() string {
 	if x != nil {
-		return x.Label
+		return x.Host
+	}
+	return ""
+}
+
+func (x *Route) GetSandbox() string {
+	if x != nil {
+		return x.Sandbox
 	}
 	return ""
 }
@@ -170,12 +185,14 @@ func (x *ListRoutesResponse) GetRoutes() []*Route {
 	return nil
 }
 
-// UpsertRouteRequest asks the daemon to route a label. The daemon picks the
-// host port, because only it knows which ports its other routes already hold.
+// UpsertRouteRequest asks the daemon to route host to a sandbox. The daemon
+// picks the host port, because only it knows which ports its other routes
+// already hold.
 type UpsertRouteRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Label         string                 `protobuf:"bytes,1,opt,name=label,proto3" json:"label,omitempty"`
-	SandboxPort   uint32                 `protobuf:"varint,2,opt,name=sandbox_port,json=sandboxPort,proto3" json:"sandbox_port,omitempty"`
+	Host          string                 `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
+	Sandbox       string                 `protobuf:"bytes,2,opt,name=sandbox,proto3" json:"sandbox,omitempty"`
+	SandboxPort   uint32                 `protobuf:"varint,3,opt,name=sandbox_port,json=sandboxPort,proto3" json:"sandbox_port,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -210,9 +227,16 @@ func (*UpsertRouteRequest) Descriptor() ([]byte, []int) {
 	return file_esb_v1_esb_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *UpsertRouteRequest) GetLabel() string {
+func (x *UpsertRouteRequest) GetHost() string {
 	if x != nil {
-		return x.Label
+		return x.Host
+	}
+	return ""
+}
+
+func (x *UpsertRouteRequest) GetSandbox() string {
+	if x != nil {
+		return x.Sandbox
 	}
 	return ""
 }
@@ -270,7 +294,7 @@ func (x *UpsertRouteResponse) GetRoute() *Route {
 
 type RemoveRouteRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Label         string                 `protobuf:"bytes,1,opt,name=label,proto3" json:"label,omitempty"`
+	Host          string                 `protobuf:"bytes,1,opt,name=host,proto3" json:"host,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -305,15 +329,17 @@ func (*RemoveRouteRequest) Descriptor() ([]byte, []int) {
 	return file_esb_v1_esb_proto_rawDescGZIP(), []int{5}
 }
 
-func (x *RemoveRouteRequest) GetLabel() string {
+func (x *RemoveRouteRequest) GetHost() string {
 	if x != nil {
-		return x.Label
+		return x.Host
 	}
 	return ""
 }
 
 type RemoveRouteResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// route is the route that was removed, unset if the host had no route.
+	Route         *Route `protobuf:"bytes,1,opt,name=route,proto3" json:"route,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -348,31 +374,137 @@ func (*RemoveRouteResponse) Descriptor() ([]byte, []int) {
 	return file_esb_v1_esb_proto_rawDescGZIP(), []int{6}
 }
 
+func (x *RemoveRouteResponse) GetRoute() *Route {
+	if x != nil {
+		return x.Route
+	}
+	return nil
+}
+
+// RemoveSandboxRoutesRequest drops every route for a sandbox at once, e.g.
+// when the sandbox itself is being destroyed.
+type RemoveSandboxRoutesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Sandbox       string                 `protobuf:"bytes,1,opt,name=sandbox,proto3" json:"sandbox,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoveSandboxRoutesRequest) Reset() {
+	*x = RemoveSandboxRoutesRequest{}
+	mi := &file_esb_v1_esb_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoveSandboxRoutesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoveSandboxRoutesRequest) ProtoMessage() {}
+
+func (x *RemoveSandboxRoutesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_esb_v1_esb_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoveSandboxRoutesRequest.ProtoReflect.Descriptor instead.
+func (*RemoveSandboxRoutesRequest) Descriptor() ([]byte, []int) {
+	return file_esb_v1_esb_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *RemoveSandboxRoutesRequest) GetSandbox() string {
+	if x != nil {
+		return x.Sandbox
+	}
+	return ""
+}
+
+type RemoveSandboxRoutesResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// routes are the routes that were removed.
+	Routes        []*Route `protobuf:"bytes,1,rep,name=routes,proto3" json:"routes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoveSandboxRoutesResponse) Reset() {
+	*x = RemoveSandboxRoutesResponse{}
+	mi := &file_esb_v1_esb_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoveSandboxRoutesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoveSandboxRoutesResponse) ProtoMessage() {}
+
+func (x *RemoveSandboxRoutesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_esb_v1_esb_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoveSandboxRoutesResponse.ProtoReflect.Descriptor instead.
+func (*RemoveSandboxRoutesResponse) Descriptor() ([]byte, []int) {
+	return file_esb_v1_esb_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *RemoveSandboxRoutesResponse) GetRoutes() []*Route {
+	if x != nil {
+		return x.Routes
+	}
+	return nil
+}
+
 var File_esb_v1_esb_proto protoreflect.FileDescriptor
 
 const file_esb_v1_esb_proto_rawDesc = "" +
 	"\n" +
-	"\x10esb/v1/esb.proto\x12\x06esb.v1\"]\n" +
-	"\x05Route\x12\x14\n" +
-	"\x05label\x18\x01 \x01(\tR\x05label\x12\x1b\n" +
-	"\thost_port\x18\x02 \x01(\rR\bhostPort\x12!\n" +
-	"\fsandbox_port\x18\x03 \x01(\rR\vsandboxPort\"\x13\n" +
+	"\x10esb/v1/esb.proto\x12\x06esb.v1\"u\n" +
+	"\x05Route\x12\x12\n" +
+	"\x04host\x18\x01 \x01(\tR\x04host\x12\x18\n" +
+	"\asandbox\x18\x02 \x01(\tR\asandbox\x12\x1b\n" +
+	"\thost_port\x18\x03 \x01(\rR\bhostPort\x12!\n" +
+	"\fsandbox_port\x18\x04 \x01(\rR\vsandboxPort\"\x13\n" +
 	"\x11ListRoutesRequest\";\n" +
 	"\x12ListRoutesResponse\x12%\n" +
-	"\x06routes\x18\x01 \x03(\v2\r.esb.v1.RouteR\x06routes\"M\n" +
-	"\x12UpsertRouteRequest\x12\x14\n" +
-	"\x05label\x18\x01 \x01(\tR\x05label\x12!\n" +
-	"\fsandbox_port\x18\x02 \x01(\rR\vsandboxPort\":\n" +
+	"\x06routes\x18\x01 \x03(\v2\r.esb.v1.RouteR\x06routes\"e\n" +
+	"\x12UpsertRouteRequest\x12\x12\n" +
+	"\x04host\x18\x01 \x01(\tR\x04host\x12\x18\n" +
+	"\asandbox\x18\x02 \x01(\tR\asandbox\x12!\n" +
+	"\fsandbox_port\x18\x03 \x01(\rR\vsandboxPort\":\n" +
 	"\x13UpsertRouteResponse\x12#\n" +
-	"\x05route\x18\x01 \x01(\v2\r.esb.v1.RouteR\x05route\"*\n" +
-	"\x12RemoveRouteRequest\x12\x14\n" +
-	"\x05label\x18\x01 \x01(\tR\x05label\"\x15\n" +
-	"\x13RemoveRouteResponse2\xe3\x01\n" +
+	"\x05route\x18\x01 \x01(\v2\r.esb.v1.RouteR\x05route\"(\n" +
+	"\x12RemoveRouteRequest\x12\x12\n" +
+	"\x04host\x18\x01 \x01(\tR\x04host\":\n" +
+	"\x13RemoveRouteResponse\x12#\n" +
+	"\x05route\x18\x01 \x01(\v2\r.esb.v1.RouteR\x05route\"6\n" +
+	"\x1aRemoveSandboxRoutesRequest\x12\x18\n" +
+	"\asandbox\x18\x01 \x01(\tR\asandbox\"D\n" +
+	"\x1bRemoveSandboxRoutesResponse\x12%\n" +
+	"\x06routes\x18\x01 \x03(\v2\r.esb.v1.RouteR\x06routes2\xc3\x02\n" +
 	"\fRouteService\x12C\n" +
 	"\n" +
 	"ListRoutes\x12\x19.esb.v1.ListRoutesRequest\x1a\x1a.esb.v1.ListRoutesResponse\x12F\n" +
 	"\vUpsertRoute\x12\x1a.esb.v1.UpsertRouteRequest\x1a\x1b.esb.v1.UpsertRouteResponse\x12F\n" +
-	"\vRemoveRoute\x12\x1a.esb.v1.RemoveRouteRequest\x1a\x1b.esb.v1.RemoveRouteResponseB2Z0github.com/hawkbawk/esb/internal/api/esbv1;esbv1b\x06proto3"
+	"\vRemoveRoute\x12\x1a.esb.v1.RemoveRouteRequest\x1a\x1b.esb.v1.RemoveRouteResponse\x12^\n" +
+	"\x13RemoveSandboxRoutes\x12\".esb.v1.RemoveSandboxRoutesRequest\x1a#.esb.v1.RemoveSandboxRoutesResponseB2Z0github.com/hawkbawk/esb/internal/api/esbv1;esbv1b\x06proto3"
 
 var (
 	file_esb_v1_esb_proto_rawDescOnce sync.Once
@@ -386,30 +518,36 @@ func file_esb_v1_esb_proto_rawDescGZIP() []byte {
 	return file_esb_v1_esb_proto_rawDescData
 }
 
-var file_esb_v1_esb_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_esb_v1_esb_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_esb_v1_esb_proto_goTypes = []any{
-	(*Route)(nil),               // 0: esb.v1.Route
-	(*ListRoutesRequest)(nil),   // 1: esb.v1.ListRoutesRequest
-	(*ListRoutesResponse)(nil),  // 2: esb.v1.ListRoutesResponse
-	(*UpsertRouteRequest)(nil),  // 3: esb.v1.UpsertRouteRequest
-	(*UpsertRouteResponse)(nil), // 4: esb.v1.UpsertRouteResponse
-	(*RemoveRouteRequest)(nil),  // 5: esb.v1.RemoveRouteRequest
-	(*RemoveRouteResponse)(nil), // 6: esb.v1.RemoveRouteResponse
+	(*Route)(nil),                       // 0: esb.v1.Route
+	(*ListRoutesRequest)(nil),           // 1: esb.v1.ListRoutesRequest
+	(*ListRoutesResponse)(nil),          // 2: esb.v1.ListRoutesResponse
+	(*UpsertRouteRequest)(nil),          // 3: esb.v1.UpsertRouteRequest
+	(*UpsertRouteResponse)(nil),         // 4: esb.v1.UpsertRouteResponse
+	(*RemoveRouteRequest)(nil),          // 5: esb.v1.RemoveRouteRequest
+	(*RemoveRouteResponse)(nil),         // 6: esb.v1.RemoveRouteResponse
+	(*RemoveSandboxRoutesRequest)(nil),  // 7: esb.v1.RemoveSandboxRoutesRequest
+	(*RemoveSandboxRoutesResponse)(nil), // 8: esb.v1.RemoveSandboxRoutesResponse
 }
 var file_esb_v1_esb_proto_depIdxs = []int32{
 	0, // 0: esb.v1.ListRoutesResponse.routes:type_name -> esb.v1.Route
 	0, // 1: esb.v1.UpsertRouteResponse.route:type_name -> esb.v1.Route
-	1, // 2: esb.v1.RouteService.ListRoutes:input_type -> esb.v1.ListRoutesRequest
-	3, // 3: esb.v1.RouteService.UpsertRoute:input_type -> esb.v1.UpsertRouteRequest
-	5, // 4: esb.v1.RouteService.RemoveRoute:input_type -> esb.v1.RemoveRouteRequest
-	2, // 5: esb.v1.RouteService.ListRoutes:output_type -> esb.v1.ListRoutesResponse
-	4, // 6: esb.v1.RouteService.UpsertRoute:output_type -> esb.v1.UpsertRouteResponse
-	6, // 7: esb.v1.RouteService.RemoveRoute:output_type -> esb.v1.RemoveRouteResponse
-	5, // [5:8] is the sub-list for method output_type
-	2, // [2:5] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	0, // 2: esb.v1.RemoveRouteResponse.route:type_name -> esb.v1.Route
+	0, // 3: esb.v1.RemoveSandboxRoutesResponse.routes:type_name -> esb.v1.Route
+	1, // 4: esb.v1.RouteService.ListRoutes:input_type -> esb.v1.ListRoutesRequest
+	3, // 5: esb.v1.RouteService.UpsertRoute:input_type -> esb.v1.UpsertRouteRequest
+	5, // 6: esb.v1.RouteService.RemoveRoute:input_type -> esb.v1.RemoveRouteRequest
+	7, // 7: esb.v1.RouteService.RemoveSandboxRoutes:input_type -> esb.v1.RemoveSandboxRoutesRequest
+	2, // 8: esb.v1.RouteService.ListRoutes:output_type -> esb.v1.ListRoutesResponse
+	4, // 9: esb.v1.RouteService.UpsertRoute:output_type -> esb.v1.UpsertRouteResponse
+	6, // 10: esb.v1.RouteService.RemoveRoute:output_type -> esb.v1.RemoveRouteResponse
+	8, // 11: esb.v1.RouteService.RemoveSandboxRoutes:output_type -> esb.v1.RemoveSandboxRoutesResponse
+	8, // [8:12] is the sub-list for method output_type
+	4, // [4:8] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_esb_v1_esb_proto_init() }
@@ -423,7 +561,7 @@ func file_esb_v1_esb_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_esb_v1_esb_proto_rawDesc), len(file_esb_v1_esb_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

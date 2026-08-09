@@ -25,8 +25,8 @@ func testConfig() *config.Config {
 // fails here rather than at 3am when a cert needs renewing.
 func TestCaddyfileAdapts(t *testing.T) {
 	routes := []route.Route{
-		{Label: "canvas-lti-fix", HostPort: 31847, SandboxPort: 3000},
-		{Label: "tool", HostPort: 30001, SandboxPort: 8080},
+		{Host: "canvas-lti-fix", Sandbox: "canvas-lti-fix", HostPort: 31847, SandboxPort: 3000},
+		{Host: "tool", Sandbox: "tool", HostPort: 30001, SandboxPort: 8080},
 	}
 	src := Caddyfile(testConfig(), routes)
 
