@@ -1,22 +1,14 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"io"
-	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 
-	imagebuild "github.com/docker/cli/cli/command/image/build"
-	"github.com/docker/docker/api/types/build"
-	"github.com/docker/docker/client"
-	"github.com/docker/docker/pkg/jsonmessage"
-	"github.com/moby/buildkit/session"
-	"github.com/moby/buildkit/session/secrets/secretsprovider"
-	archive "github.com/moby/go-archive"
 	"github.com/spf13/cobra"
 
 	"github.com/hawkbawk/esb/internal/project"
@@ -50,7 +42,8 @@ An optional esb.json in that same directory lists the kits to pass to
 sbx create. Each entry is whatever --kit accepts: a local path, a URL,
 or an OCI reference. The ordering of kits is important. If one kit depends on another,
 its dependencies must be listed before it to ensure the install and setup scripts run in
-the correct order.
+the correct order. Note that local paths are resolved relative to the repo root, not the location
+of the esb.json file, just like the dockerfile key.
 
 esb.json can also set "dockerfile" to use a Dockerfile other than the one
 directly inside the given directory. It's either a path relative to the repo
@@ -96,64 +89,24 @@ instructions during the build and are never baked into the resulting image layer
 
 // builtImageID returns the short (12-hex-char) image ID docker assigned to
 // ref, matching the form docker sandbox reports in `sbx template ls --json`.
-func builtImageID(ctx context.Context, cli *client.Client, ref string) (string, error) {
-	inspect, err := cli.ImageInspect(ctx, ref)
+func builtImageID(ref string) (string, error) {
+	out, err := exec.Command("docker", "image", "inspect", "--format", "{{.Id}}", ref).Output()
 	if err != nil {
 		return "", fmt.Errorf("docker image inspect %s: %w", ref, err)
 	}
-	id := strings.TrimPrefix(inspect.ID, "sha256:")
+	id := strings.TrimPrefix(strings.TrimSpace(string(out)), "sha256:")
 	if len(id) > 12 {
 		id = id[:12]
 	}
 	return id, nil
 }
 
-// parseSecretSpecs parses --secret flags using the same id=<name>,src=<path>
-// or id=<name>,env=<var> syntax as `docker build --secret`.
-func parseSecretSpecs(specs []string) ([]secretsprovider.Source, error) {
-	srcs := make([]secretsprovider.Source, 0, len(specs))
-	for _, spec := range specs {
-		var src secretsprovider.Source
-		for field := range strings.SplitSeq(spec, ",") {
-			key, value, ok := strings.Cut(field, "=")
-			if !ok {
-				return nil, fmt.Errorf("--secret %q must be a comma-separated list of key=value pairs", spec)
-			}
-			switch key {
-			case "id":
-				src.ID = value
-			case "src", "source":
-				src.FilePath = value
-			case "env":
-				src.Env = value
-			default:
-				return nil, fmt.Errorf("--secret %q: unsupported key %q (expected id, src, or env)", spec, key)
-			}
-		}
-		if src.ID == "" {
-			return nil, fmt.Errorf("--secret %q must set id=<name>", spec)
-		}
-		srcs = append(srcs, src)
-	}
-	return srcs, nil
-}
-
-// saveImage writes ref to tarPath in the same format as `docker save -o`.
-func saveImage(ctx context.Context, cli *client.Client, ref, tarPath string) error {
-	rc, err := cli.ImageSave(ctx, []string{ref})
-	if err != nil {
-		return err
-	}
-	defer rc.Close()
-
-	f, err := os.Create(tarPath)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	_, err = io.Copy(f, rc)
-	return err
+// saveImage writes ref to tarPath, equivalent to `docker save -o tarPath ref`.
+func saveImage(ref, tarPath string) error {
+	cmd := exec.Command("docker", "save", "-o", tarPath, ref)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
 
 // runFromTemplate builds a Docker Sandbox template image from dir's
@@ -214,104 +167,40 @@ func runFromTemplate(dir, tag, port, name, workspace, agent, agentPrompt string,
 		sandboxName = baseName
 	}
 
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
-	if err != nil {
-		return fmt.Errorf("connecting to docker: %w", err)
-	}
-	defer cli.Close()
-
-	ctx := context.Background()
-
-	buildArgMap := make(map[string]*string, len(buildArgs)+1)
 	for _, arg := range buildArgs {
-		k, v, ok := strings.Cut(arg, "=")
-		if !ok {
+		if !strings.Contains(arg, "=") {
 			return fmt.Errorf("--build-arg %q must be in KEY=VALUE form", arg)
 		}
-		buildArgMap[k] = &v
-	}
-	// Users can use this
-	buildArgMap["WORKSPACE_DIR"] = &parentDir
-
-	fmt.Printf("Building %s:%s (and :latest) from %s ...\n", templateTag, gitSHA, dockerfile)
-	if verbose {
-		fmt.Fprintf(os.Stderr, "+ docker build -f %s -t %s:%s -t %s:latest %s\n", dockerfile, templateTag, gitSHA, templateTag, parentDir)
 	}
 
-	// Very closely mirrors how https://github.com/docker/cli/blob/master/cli/command/image/build.go
-	// builds images
-	excludes, err := imagebuild.ReadDockerignore(parentDir)
-	if err != nil {
-		return fmt.Errorf("reading .dockerignore: %w", err)
-	}
 	absDockerfile, err := filepath.Abs(dockerfile)
 	if err != nil {
 		return err
 	}
-	relDockerfile, err := filepath.Rel(parentDir, absDockerfile)
-	if err != nil {
-		return err
-	}
-	excludes = imagebuild.TrimBuildFilesFromExcludes(excludes, filepath.ToSlash(relDockerfile), false)
-	buildCtx, err := archive.TarWithOptions(parentDir, &archive.TarOptions{ExcludePatterns: excludes})
-	if err != nil {
-		return fmt.Errorf("docker build: %w", err)
-	}
-	defer buildCtx.Close()
 
-	buildOpts := build.ImageBuildOptions{
-		Dockerfile: dockerfile,
-		Tags:       []string{templateTag + ":" + gitSHA, templateTag + ":latest"},
-		BuildArgs:  buildArgMap,
-		Remove:     true,
+	fmt.Printf("Building %s:%s (and :latest) from %s ...\n", templateTag, gitSHA, dockerfile)
+
+	buildCmdArgs := []string{"build", "-f", absDockerfile, "-t", templateTag + ":" + gitSHA, "-t", templateTag + ":latest"}
+	for _, arg := range buildArgs {
+		buildCmdArgs = append(buildCmdArgs, "--build-arg", arg)
 	}
-
-	// Secrets are a BuildKit-only feature: the classic /build endpoint used
-	// above never supported them. Attaching a session (and asking the
-	// daemon to route the build through its embedded BuildKit) is what
-	// `docker build --secret` itself does under the hood.
-	if len(secrets) > 0 {
-		srcs, err := parseSecretSpecs(secrets)
-		if err != nil {
-			return err
-		}
-		store, err := secretsprovider.NewStore(srcs)
-		if err != nil {
-			return err
-		}
-		sess, err := session.NewSession(ctx, templateTag)
-		if err != nil {
-			return fmt.Errorf("creating buildkit session: %w", err)
-		}
-		sess.Allow(secretsprovider.NewSecretProvider(store))
-
-		sessCtx, cancelSess := context.WithCancel(ctx)
-		defer cancelSess()
-		sessErr := make(chan error, 1)
-		go func() {
-			sessErr <- sess.Run(sessCtx, func(ctx context.Context, proto string, meta map[string][]string) (net.Conn, error) {
-				return cli.DialHijack(ctx, "/session", proto, meta)
-			})
-		}()
-		defer func() {
-			sess.Close()
-			<-sessErr
-		}()
-
-		buildOpts.SessionID = sess.ID()
-		buildOpts.Version = build.BuilderBuildKit
+	buildCmdArgs = append(buildCmdArgs, "--build-arg", "WORKSPACE_DIR="+parentDir)
+	for _, secret := range secrets {
+		buildCmdArgs = append(buildCmdArgs, "--secret", secret)
 	}
+	buildCmdArgs = append(buildCmdArgs, parentDir)
 
-	buildResp, err := cli.ImageBuild(ctx, buildCtx, buildOpts)
-	if err != nil {
-		return fmt.Errorf("docker build: %w", err)
+	if verbose {
+		fmt.Fprintf(os.Stderr, "+ docker %s\n", strings.Join(buildCmdArgs, " "))
 	}
-	defer buildResp.Body.Close()
-	if err := jsonmessage.DisplayJSONMessagesStream(buildResp.Body, os.Stdout, os.Stdout.Fd(), false, nil); err != nil {
+	buildCmd := exec.Command("docker", buildCmdArgs...)
+	buildCmd.Stdout = os.Stdout
+	buildCmd.Stderr = os.Stderr
+	if err := buildCmd.Run(); err != nil {
 		return fmt.Errorf("docker build: %w", err)
 	}
 
-	imageID, err := builtImageID(ctx, cli, templateTag+":latest")
+	imageID, err := builtImageID(templateTag + ":latest")
 	if err != nil {
 		return err
 	}
@@ -335,7 +224,7 @@ func runFromTemplate(dir, tag, port, name, workspace, agent, agentPrompt string,
 		if verbose {
 			fmt.Fprintf(os.Stderr, "+ docker save -o %s %s:latest\n", tarPath, templateTag)
 		}
-		if err := saveImage(ctx, cli, templateTag+":latest", tarPath); err != nil {
+		if err := saveImage(templateTag+":latest", tarPath); err != nil {
 			return fmt.Errorf("docker save: %w", err)
 		}
 
