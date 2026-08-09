@@ -1,3 +1,4 @@
+self:
 {
   config,
   lib,
@@ -59,8 +60,8 @@ in
 
     package = lib.mkOption {
       type = lib.types.package;
-      default = pkgs.callPackage ./package.nix { };
-      defaultText = lib.literalExpression "pkgs.callPackage ./package.nix { }";
+      default = self.packages.${pkgs.stdenv.hostPlatform.system}.esb;
+      defaultText = lib.literalExpression "self.packages.\${pkgs.stdenv.hostPlatform.system}.esb";
       description = "The esb package providing the daemon.";
     };
 

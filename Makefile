@@ -1,4 +1,4 @@
-.PHONY: default install clean lint
+.PHONY: default install clean lint bump-vendor-hash
 
 default:
 	go generate ./...
@@ -19,3 +19,6 @@ lint:
 	gofmt -l -w .
 	go vet ./...
 	staticcheck ./...
+
+bump-vendor-hash:
+	nix-update --flake esb --version skip
