@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -13,6 +14,8 @@ import (
 	"github.com/docker/docker/api/types/build"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/jsonmessage"
+	"github.com/moby/buildkit/session"
+	"github.com/moby/buildkit/session/secrets/secretsprovider"
 	archive "github.com/moby/go-archive"
 	"github.com/spf13/cobra"
 
@@ -30,6 +33,7 @@ func newFromTemplateCmd() *cobra.Command {
 		agentPrompt string
 		buildArgs   []string
 		createArgs  []string
+		secrets     []string
 		verbose     bool
 	)
 
@@ -61,6 +65,10 @@ to set the working directory inside the Docker container to match the same works
 that Docker Sandbox will use, which is always the absolute path to the repository root on the
 host machine.
 
+--secret follows the same convention as docker build --secret: id=<name>,src=<path>
+or id=<name>,env=<var>. Secrets are made available to RUN --mount=type=secret
+instructions during the build and are never baked into the resulting image layers.
+
     `,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -68,7 +76,7 @@ host machine.
 			if len(args) == 1 {
 				dir = args[0]
 			}
-			return runFromTemplate(dir, tag, port, name, workspace, agent, agentPrompt, buildArgs, createArgs, verbose)
+			return runFromTemplate(dir, tag, port, name, workspace, agent, agentPrompt, buildArgs, createArgs, secrets, verbose)
 		},
 	}
 
@@ -81,6 +89,7 @@ host machine.
 	f.StringVarP(&agentPrompt, "agent-prompt", "P", "", "prompt to pass to the agent (or piped via stdin); if set, runs the agent in the background once the sandbox is created. NOTE: Only works with Claude Code. Use `claude agents` inside the sandbox to reconnect")
 	f.StringArrayVarP(&buildArgs, "build-arg", "b", nil, "extra argument for docker build (repeatable)")
 	f.StringArrayVarP(&createArgs, "create-arg", "c", nil, "extra argument for sbx create (repeatable)")
+	f.StringArrayVar(&secrets, "secret", nil, "secret to expose to the build, same syntax as docker build --secret: id=<name>,src=<path> or id=<name>,env=<var> (repeatable)")
 	f.BoolVarP(&verbose, "verbose", "v", false, "echo the commands being run")
 	return cmd
 }
@@ -97,6 +106,36 @@ func builtImageID(ctx context.Context, cli *client.Client, ref string) (string, 
 		id = id[:12]
 	}
 	return id, nil
+}
+
+// parseSecretSpecs parses --secret flags using the same id=<name>,src=<path>
+// or id=<name>,env=<var> syntax as `docker build --secret`.
+func parseSecretSpecs(specs []string) ([]secretsprovider.Source, error) {
+	srcs := make([]secretsprovider.Source, 0, len(specs))
+	for _, spec := range specs {
+		var src secretsprovider.Source
+		for field := range strings.SplitSeq(spec, ",") {
+			key, value, ok := strings.Cut(field, "=")
+			if !ok {
+				return nil, fmt.Errorf("--secret %q must be a comma-separated list of key=value pairs", spec)
+			}
+			switch key {
+			case "id":
+				src.ID = value
+			case "src", "source":
+				src.FilePath = value
+			case "env":
+				src.Env = value
+			default:
+				return nil, fmt.Errorf("--secret %q: unsupported key %q (expected id, src, or env)", spec, key)
+			}
+		}
+		if src.ID == "" {
+			return nil, fmt.Errorf("--secret %q must set id=<name>", spec)
+		}
+		srcs = append(srcs, src)
+	}
+	return srcs, nil
 }
 
 // saveImage writes ref to tarPath in the same format as `docker save -o`.
@@ -119,7 +158,7 @@ func saveImage(ctx context.Context, cli *client.Client, ref, tarPath string) err
 
 // runFromTemplate builds a Docker Sandbox template image from dir's
 // Dockerfile, loads it, and creates a sandbox from it.
-func runFromTemplate(dir, tag, port, name, workspace, agent, agentPrompt string, buildArgs, createArgs []string, verbose bool) error {
+func runFromTemplate(dir, tag, port, name, workspace, agent, agentPrompt string, buildArgs, createArgs, secrets []string, verbose bool) error {
 	if agentPrompt == "" {
 		if stat, err := os.Stdin.Stat(); err == nil && stat.Mode()&os.ModeCharDevice == 0 {
 			piped, err := io.ReadAll(os.Stdin)
@@ -220,12 +259,50 @@ func runFromTemplate(dir, tag, port, name, workspace, agent, agentPrompt string,
 	}
 	defer buildCtx.Close()
 
-	buildResp, err := cli.ImageBuild(ctx, buildCtx, build.ImageBuildOptions{
+	buildOpts := build.ImageBuildOptions{
 		Dockerfile: dockerfile,
 		Tags:       []string{templateTag + ":" + gitSHA, templateTag + ":latest"},
 		BuildArgs:  buildArgMap,
 		Remove:     true,
-	})
+	}
+
+	// Secrets are a BuildKit-only feature: the classic /build endpoint used
+	// above never supported them. Attaching a session (and asking the
+	// daemon to route the build through its embedded BuildKit) is what
+	// `docker build --secret` itself does under the hood.
+	if len(secrets) > 0 {
+		srcs, err := parseSecretSpecs(secrets)
+		if err != nil {
+			return err
+		}
+		store, err := secretsprovider.NewStore(srcs)
+		if err != nil {
+			return err
+		}
+		sess, err := session.NewSession(ctx, templateTag)
+		if err != nil {
+			return fmt.Errorf("creating buildkit session: %w", err)
+		}
+		sess.Allow(secretsprovider.NewSecretProvider(store))
+
+		sessCtx, cancelSess := context.WithCancel(ctx)
+		defer cancelSess()
+		sessErr := make(chan error, 1)
+		go func() {
+			sessErr <- sess.Run(sessCtx, func(ctx context.Context, proto string, meta map[string][]string) (net.Conn, error) {
+				return cli.DialHijack(ctx, "/session", proto, meta)
+			})
+		}()
+		defer func() {
+			sess.Close()
+			<-sessErr
+		}()
+
+		buildOpts.SessionID = sess.ID()
+		buildOpts.Version = build.BuilderBuildKit
+	}
+
+	buildResp, err := cli.ImageBuild(ctx, buildCtx, buildOpts)
 	if err != nil {
 		return fmt.Errorf("docker build: %w", err)
 	}
