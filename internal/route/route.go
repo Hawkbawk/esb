@@ -200,7 +200,7 @@ func (s *Store) allocLocked(host string, portMin, portMax int) (int, error) {
 		return 0, fmt.Errorf("hash failed: %w", err)
 	}
 	span := portMax - portMin + 1
-	start := portMin + int(h.Sum32() % uint32(span))
+	start := portMin + int(h.Sum32()%uint32(span))
 
 	for i := start; i < portMax; i++ {
 		if taken[i] || bound(i) {

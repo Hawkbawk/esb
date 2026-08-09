@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	imagebuild "github.com/docker/cli/cli/command/image/build"
 	"github.com/docker/docker/api/types/build"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/jsonmessage"
@@ -47,7 +48,11 @@ or an OCI reference. The ordering of kits is important. If one kit depends on an
 its dependencies must be listed before it to ensure the install and setup scripts run in
 the correct order.
 
-    {"kits": ["./my-kit", "docker/kit-node:latest"]}`,
+esb.json can also set "dockerfile" to use a Dockerfile other than the one
+directly inside the given directory. It's either a path relative to the repo
+root (the CWD from-template is expected to be run from) or an absolute path.
+
+    {"kits": ["./my-kit", "docker/kit-node:latest"], "dockerfile": "docker/Dockerfile.sandbox"}`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir := ".docker-sandbox"
@@ -120,8 +125,20 @@ func runFromTemplate(dir, tag, port, name, workspace, agent, agentPrompt string,
 	if err != nil || !info.IsDir() {
 		return fmt.Errorf("directory %q not found", dir)
 	}
+
+	proj, err := project.LoadConfig(dir)
+	if err != nil {
+		return err
+	}
+
 	dockerfile := filepath.Join(dir, "Dockerfile")
+	if proj.Dockerfile != "" {
+		dockerfile = proj.Dockerfile
+	}
 	if _, err := os.Stat(dockerfile); err != nil {
+		if proj.Dockerfile != "" {
+			return fmt.Errorf("no Dockerfile at %q (from the %q key in %s)", dockerfile, "dockerfile", filepath.Join(dir, project.ConfigName))
+		}
 		return fmt.Errorf("no Dockerfile at %q\nfrom-template expects a Dockerfile directly inside the given directory", dockerfile)
 	}
 
@@ -170,7 +187,23 @@ func runFromTemplate(dir, tag, port, name, workspace, agent, agentPrompt string,
 	if verbose {
 		fmt.Fprintf(os.Stderr, "+ docker build -f %s -t %s:%s -t %s:latest %s\n", dockerfile, templateTag, gitSHA, templateTag, parentDir)
 	}
-	buildCtx, err := archive.TarWithOptions(parentDir, &archive.TarOptions{})
+
+	// Very closely mirrors how https://github.com/docker/cli/blob/master/cli/command/image/build.go
+	// builds images
+	excludes, err := imagebuild.ReadDockerignore(parentDir)
+	if err != nil {
+		return fmt.Errorf("reading .dockerignore: %w", err)
+	}
+	absDockerfile, err := filepath.Abs(dockerfile)
+	if err != nil {
+		return err
+	}
+	relDockerfile, err := filepath.Rel(parentDir, absDockerfile)
+	if err != nil {
+		return err
+	}
+	excludes = imagebuild.TrimBuildFilesFromExcludes(excludes, filepath.ToSlash(relDockerfile), false)
+	buildCtx, err := archive.TarWithOptions(parentDir, &archive.TarOptions{ExcludePatterns: excludes})
 	if err != nil {
 		return fmt.Errorf("docker build: %w", err)
 	}
@@ -222,11 +255,6 @@ func runFromTemplate(dir, tag, port, name, workspace, agent, agentPrompt string,
 		if err := sbx.Run("template", "load", tarPath); err != nil {
 			return err
 		}
-	}
-
-	proj, err := project.LoadConfig(dir)
-	if err != nil {
-		return err
 	}
 
 	fmt.Printf("Creating sandbox %q from template %q ...\n", sandboxName, templateTag)

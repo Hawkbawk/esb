@@ -22,6 +22,12 @@ type Config struct {
 	// is whatever that flag accepts: a local path, a URL, or an OCI
 	// reference.
 	Kits []string `json:"kits"`
+
+	// Dockerfile overrides the Dockerfile used to build the template image.
+	// It's either a path relative to the repo root (the CWD `from-template`
+	// is expected to be run from) or an absolute path. If empty, the
+	// Dockerfile directly inside the sandbox directory is used instead.
+	Dockerfile string `json:"dockerfile"`
 }
 
 // LoadConfig reads dir/esb.json. The file is optional, so a missing one gives
