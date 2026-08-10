@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -69,7 +70,19 @@ instructions during the build and are never baked into the resulting image layer
 			if len(args) == 1 {
 				dir = args[0]
 			}
-			return runFromTemplate(dir, tag, port, name, workspace, agent, agentPrompt, buildArgs, createArgs, secrets, verbose)
+			return runFromTemplate(FromTemplateOptions{
+				Dir:         dir,
+				Tag:         tag,
+				Port:        port,
+				Name:        name,
+				Workspace:   workspace,
+				Agent:       agent,
+				AgentPrompt: agentPrompt,
+				BuildArgs:   buildArgs,
+				CreateArgs:  createArgs,
+				Secrets:     secrets,
+				Verbose:     verbose,
+			})
 		},
 	}
 
@@ -83,7 +96,7 @@ instructions during the build and are never baked into the resulting image layer
 	f.StringArrayVarP(&buildArgs, "build-arg", "b", nil, "extra argument for docker build (repeatable)")
 	f.StringArrayVarP(&createArgs, "create-arg", "c", nil, "extra argument for sbx create (repeatable)")
 	f.StringArrayVar(&secrets, "secret", nil, "secret to expose to the build, same syntax as docker build --secret: id=<name>,src=<path> or id=<name>,env=<var> (repeatable)")
-	f.BoolVarP(&verbose, "verbose", "v", false, "echo the commands being run")
+	f.BoolVarP(&verbose, "verbose", "v", false, "enable verbose logging to stderr")
 	return cmd
 }
 
@@ -109,11 +122,37 @@ func saveImage(ref, tarPath string) error {
 	return cmd.Run()
 }
 
-// runFromTemplate builds a Docker Sandbox template image from dir's
+// FromTemplateOptions holds the CLI arguments for the from-template command.
+type FromTemplateOptions struct {
+	Dir         string
+	Tag         string
+	Port        string
+	Name        string
+	Workspace   string
+	Agent       string
+	AgentPrompt string
+	BuildArgs   []string
+	CreateArgs  []string
+	Secrets     []string
+	Verbose     bool
+}
+
+// runFromTemplate builds a Docker Sandbox template image from opts.Dir's
 // Dockerfile, loads it, and creates a sandbox from it.
-func runFromTemplate(dir, tag, port, name, workspace, agent, agentPrompt string, buildArgs, createArgs, secrets []string, verbose bool) error {
+func runFromTemplate(opts FromTemplateOptions) error {
+	dir, tag, port, name, workspace, agent, agentPrompt := opts.Dir, opts.Tag, opts.Port, opts.Name, opts.Workspace, opts.Agent, opts.AgentPrompt
+	buildArgs, createArgs, secrets, verbose := opts.BuildArgs, opts.CreateArgs, opts.Secrets, opts.Verbose
+
+	verboseLog := log.New(io.Discard, "verbose: ", 0)
+	if verbose {
+		verboseLog.SetOutput(os.Stderr)
+	}
+
+	verboseLog.Printf("dir=%q tag=%q port=%q name=%q workspace=%q agent=%q", dir, tag, port, name, workspace, agent)
+
 	if agentPrompt == "" {
 		if stat, err := os.Stdin.Stat(); err == nil && stat.Mode()&os.ModeCharDevice == 0 {
+			verboseLog.Printf("reading agent prompt from stdin")
 			piped, err := io.ReadAll(os.Stdin)
 			if err != nil {
 				return fmt.Errorf("reading agent prompt from stdin: %w", err)
@@ -131,6 +170,7 @@ func runFromTemplate(dir, tag, port, name, workspace, agent, agentPrompt string,
 	if err != nil {
 		return err
 	}
+	verboseLog.Printf("loaded project config: kits=%v dockerfile=%q", proj.Kits, proj.Dockerfile)
 
 	dockerfile := filepath.Join(dir, "Dockerfile")
 	if proj.Dockerfile != "" {
@@ -148,6 +188,7 @@ func runFromTemplate(dir, tag, port, name, workspace, agent, agentPrompt string,
 		return err
 	}
 	parentDir := filepath.Dir(absDir)
+	verboseLog.Printf("absDir=%q parentDir=%q", absDir, parentDir)
 
 	baseName := tag
 	if baseName == "" {
@@ -161,6 +202,7 @@ func runFromTemplate(dir, tag, port, name, workspace, agent, agentPrompt string,
 	if err != nil {
 		return fmt.Errorf("%q is not a git repository (needed to derive the image tag)", parentDir)
 	}
+	verboseLog.Printf("templateTag=%q gitSHA=%q", templateTag, gitSHA)
 
 	sandboxName := name
 	if sandboxName == "" {
@@ -177,10 +219,14 @@ func runFromTemplate(dir, tag, port, name, workspace, agent, agentPrompt string,
 	if err != nil {
 		return err
 	}
+	verboseLog.Printf("absDockerfile=%q sandboxName=%q", absDockerfile, sandboxName)
 
 	fmt.Printf("Building %s:%s (and :latest) from %s ...\n", templateTag, gitSHA, dockerfile)
 
 	buildCmdArgs := []string{"build", "-f", absDockerfile, "-t", templateTag + ":" + gitSHA, "-t", templateTag + ":latest"}
+	if verbose {
+		buildCmdArgs = append(buildCmdArgs, "--progress", "plain")
+	}
 	for _, arg := range buildArgs {
 		buildCmdArgs = append(buildCmdArgs, "--build-arg", arg)
 	}
@@ -190,9 +236,7 @@ func runFromTemplate(dir, tag, port, name, workspace, agent, agentPrompt string,
 	}
 	buildCmdArgs = append(buildCmdArgs, parentDir)
 
-	if verbose {
-		fmt.Fprintf(os.Stderr, "+ docker %s\n", strings.Join(buildCmdArgs, " "))
-	}
+	verboseLog.Printf("+ docker %s", strings.Join(buildCmdArgs, " "))
 	buildCmd := exec.Command("docker", buildCmdArgs...)
 	buildCmd.Stdout = os.Stdout
 	buildCmd.Stderr = os.Stderr
@@ -204,11 +248,13 @@ func runFromTemplate(dir, tag, port, name, workspace, agent, agentPrompt string,
 	if err != nil {
 		return err
 	}
+	verboseLog.Printf("built image ID=%q", imageID)
 
 	alreadyLoaded, err := sbx.HasTemplateImage(imageID)
 	if err != nil {
 		return err
 	}
+	verboseLog.Printf("alreadyLoaded=%v", alreadyLoaded)
 
 	if alreadyLoaded {
 		fmt.Printf("Template image %s is already loaded into docker sandbox, skipping save/load ...\n", imageID)
@@ -219,16 +265,16 @@ func runFromTemplate(dir, tag, port, name, workspace, agent, agentPrompt string,
 		}
 		defer os.RemoveAll(tmpDir)
 		tarPath := filepath.Join(tmpDir, templateTag+".tar")
+		verboseLog.Printf("tarPath=%q", tarPath)
 
 		fmt.Printf("Saving image to %s ...\n", tarPath)
-		if verbose {
-			fmt.Fprintf(os.Stderr, "+ docker save -o %s %s:latest\n", tarPath, templateTag)
-		}
+		verboseLog.Printf("+ docker save -o %s %s:latest", tarPath, templateTag)
 		if err := saveImage(templateTag+":latest", tarPath); err != nil {
 			return fmt.Errorf("docker save: %w", err)
 		}
 
 		fmt.Println("Loading template into docker sandbox ...")
+		verboseLog.Printf("+ sbx template load %s", tarPath)
 		if err := sbx.Run("template", "load", tarPath); err != nil {
 			return err
 		}
@@ -241,22 +287,26 @@ func runFromTemplate(dir, tag, port, name, workspace, agent, agentPrompt string,
 	}
 	create = append(create, createArgs...)
 	create = append(create, agent, workspace)
+	verboseLog.Printf("+ sbx %s", strings.Join(create, " "))
 	if err := sbx.Run(create...); err != nil {
 		return err
 	}
 
 	if agentPrompt != "" {
+		verboseLog.Printf("+ sbx run --name %s -- --bg <agentPrompt>", sandboxName)
 		if err := sbx.Run("run", "--name", sandboxName, "--", "--bg", agentPrompt); err != nil {
 			return err
 		}
 	}
 
 	if port == "" {
+		verboseLog.Printf("no --port given, skipping route setup")
 		return nil
 	}
 	sandboxPort, err := strconv.Atoi(port)
 	if err != nil {
 		return fmt.Errorf("port %q is not a number", port)
 	}
+	verboseLog.Printf("routing host %s -> sandbox %s port %d", sandboxName, sandboxName, sandboxPort)
 	return RouteHost(sandboxName, sandboxName, sandboxPort)
 }
