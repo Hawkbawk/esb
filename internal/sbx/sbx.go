@@ -81,20 +81,39 @@ func TemplateImages() ([]TemplateImage, error) {
 	return parsed.Images, nil
 }
 
-// HasTemplateImage reports whether a template with the given image ID is
-// already loaded into docker sandbox. Docker sandbox IDs are the short
-// (12-hex-char) form, so id is matched by prefix either way.
-func HasTemplateImage(id string) (bool, error) {
+// shortIDLen is the length of the image IDs docker sandbox reports in
+// `sbx template ls --json`. IDs are compared at this length so a full
+// 64-hex-char ID still matches the short form docker sandbox prints.
+const shortIDLen = 12
+
+// LoadedTemplateImage returns the first of ids that is already loaded into
+// docker sandbox as a template, or "" if none of them are. ids are given in
+// preference order, and may be either the short (12-hex-char) or full form.
+func LoadedTemplateImage(ids []string) (string, error) {
 	images, err := TemplateImages()
 	if err != nil {
-		return false, err
+		return "", err
 	}
+
+	loaded := make(map[string]struct{}, len(images))
 	for _, img := range images {
-		if strings.HasPrefix(img.ID, id) || strings.HasPrefix(id, img.ID) {
-			return true, nil
+		loaded[shortID(img.ID)] = struct{}{}
+	}
+	for _, id := range ids {
+		if _, ok := loaded[shortID(id)]; ok {
+			return id, nil
 		}
 	}
-	return false, nil
+	return "", nil
+}
+
+// shortID truncates an image ID to the form docker sandbox reports.
+func shortID(id string) string {
+	id = strings.TrimPrefix(id, "sha256:")
+	if len(id) > shortIDLen {
+		return id[:shortIDLen]
+	}
+	return id
 }
 
 // Exists reports whether a sandbox with exactly this name is present.

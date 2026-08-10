@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -92,18 +93,43 @@ instructions during the build and are never baked into the resulting image layer
 	return cmd
 }
 
-// builtImageID returns the short (12-hex-char) image ID docker assigned to
-// ref, matching the form docker sandbox reports in `sbx template ls --json`.
-func builtImageID(ref string) (string, error) {
-	out, err := exec.Command("docker", "image", "inspect", "--format", "{{.Id}}", ref).Output()
+// imageIdentity is what we know about a local docker image: the ID docker
+// gave it, plus the digests of its filesystem layers.
+//
+// The ID alone can't tell us whether two builds produced the same image:
+// buildkit stamps a fresh timestamp into the image config on every export,
+// so even a fully cached rebuild gets a new ID over a byte-identical
+// filesystem. The layer digests don't move, so they're what we compare.
+type imageIdentity struct {
+	// id is the short (12-hex-char) form, matching what docker sandbox
+	// reports in `sbx template ls --json`.
+	id     string
+	layers []string
+}
+
+// sameContent reports whether other has the same filesystem layers as ident,
+// i.e. whether loading one into docker sandbox would be equivalent to
+// loading the other. An identity with no layers never matches anything,
+// since that means we failed to learn what the image contains.
+func (ident imageIdentity) sameContent(other imageIdentity) bool {
+	return len(ident.layers) > 0 && slices.Equal(ident.layers, other.layers)
+}
+
+// inspectImage reads the ID and layer digests docker has for ref.
+func inspectImage(ref string) (imageIdentity, error) {
+	out, err := exec.Command("docker", "image", "inspect", "--format", "{{.Id}}{{range .RootFS.Layers}} {{.}}{{end}}", ref).Output()
 	if err != nil {
-		return "", fmt.Errorf("docker image inspect %s: %w", ref, err)
+		return imageIdentity{}, fmt.Errorf("docker image inspect %s: %w", ref, err)
 	}
-	id := strings.TrimPrefix(strings.TrimSpace(string(out)), "sha256:")
+	fields := strings.Fields(string(out))
+	if len(fields) == 0 {
+		return imageIdentity{}, fmt.Errorf("docker image inspect %s: no output", ref)
+	}
+	id := strings.TrimPrefix(fields[0], "sha256:")
 	if len(id) > 12 {
 		id = id[:12]
 	}
-	return id, nil
+	return imageIdentity{id: id, layers: fields[1:]}, nil
 }
 
 // randomSuffix returns a short random hex string used to disambiguate a
@@ -232,10 +258,18 @@ func (opts *FromTemplateCommand) Run() error {
 	}
 	opts.verboseLog.Printf("absDockerfile=%q sandboxName=%q", absDockerfile, sandboxName)
 
+	previous, err := inspectImage(templateTag + ":latest")
+	if err != nil {
+		opts.verboseLog.Printf("no previous %s:latest to compare against: %v", templateTag, err)
+		previous = imageIdentity{}
+	} else {
+		opts.verboseLog.Printf("previous image ID=%q layers=%d", previous.id, len(previous.layers))
+	}
+
 	if err := opts.buildImage(absDockerfile, parentDir, templateTag, gitSHA); err != nil {
 		return err
 	}
-	if err := opts.loadTemplateImage(templateTag); err != nil {
+	if err := opts.loadTemplateImage(templateTag, previous); err != nil {
 		return err
 	}
 	if err := opts.createSandbox(templateTag, sandboxName, proj.Kits); err != nil {
@@ -356,22 +390,34 @@ func (opts *FromTemplateCommand) buildImage(absDockerfile, parentDir, templateTa
 }
 
 // loadTemplateImage saves templateTag:latest and loads it into docker
-// sandbox, unless an image with the same ID is already loaded.
-func (opts *FromTemplateCommand) loadTemplateImage(templateTag string) error {
-	imageID, err := builtImageID(templateTag + ":latest")
+// sandbox, unless the same content is already loaded.
+//
+// previous is what templateTag:latest pointed at before the build, as
+// captured by Run.
+func (opts *FromTemplateCommand) loadTemplateImage(templateTag string, previous imageIdentity) error {
+	built, err := inspectImage(templateTag + ":latest")
 	if err != nil {
 		return err
 	}
-	opts.verboseLog.Printf("built image ID=%q", imageID)
+	opts.verboseLog.Printf("built image ID=%q layers=%d", built.id, len(built.layers))
 
-	alreadyLoaded, err := sbx.HasTemplateImage(imageID)
+	// The built ID is worth checking on its own in case the build did come
+	// out reproducible; the previous ID only counts if the rebuild landed
+	// on the same layers.
+	candidates := []string{built.id}
+	if built.sameContent(previous) {
+		opts.verboseLog.Printf("rebuild matched previous layers, checking for ID %q", previous.id)
+		candidates = append(candidates, previous.id)
+	}
+
+	loaded, err := sbx.LoadedTemplateImage(candidates)
 	if err != nil {
 		return err
 	}
-	opts.verboseLog.Printf("alreadyLoaded=%v", alreadyLoaded)
+	opts.verboseLog.Printf("loaded template image from candidates %v: %q", candidates, loaded)
 
-	if alreadyLoaded {
-		fmt.Printf("Template image %s is already loaded into docker sandbox, skipping save/load ...\n", imageID)
+	if loaded != "" {
+		fmt.Printf("Template image %s is already loaded into docker sandbox, skipping save/load ...\n", loaded)
 		return nil
 	}
 
