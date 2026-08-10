@@ -20,6 +20,8 @@ go generate ./...   # regenerates internal/api/esbv1 stubs from proto/esb/v1/esb
 
 There's a Makefile that contains some common commands (build, install, lint, clean).
 
+To have access to go and all other necessary tools, you *MUST* use nix.
+
 ## Architecture
 
 esb is split into two halves that run as separate processes and communicate over a Unix socket:

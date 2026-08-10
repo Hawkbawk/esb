@@ -13,6 +13,8 @@ import (
 	"os/exec"
 	"slices"
 	"strings"
+
+	"al.essio.dev/pkg/shellescape"
 )
 
 // Run streams a sandbox command straight to the terminal, since these are
@@ -114,6 +116,26 @@ func shortID(id string) string {
 		return id[:shortIDLen]
 	}
 	return id
+}
+
+// persistentEnvFile is sourced by shells inside the sandbox, so anything
+// appended here survives across `sbx run`/`sbx exec` sessions.
+const persistentEnvFile = "/etc/sandbox-persistent.sh"
+
+// AddPermanentEnvVar appends `export key=value` to the sandbox's persistent
+// environment file, so every later shell in that sandbox sees it.
+func AddPermanentEnvVar(sandbox, key, value string) error {
+	line := fmt.Sprintf("export %s=%s", key, shellescape.Quote(value))
+	script := fmt.Sprintf("printf '%%s\\n' %s >> %s", shellescape.Quote(line), persistentEnvFile)
+
+	cmd := exec.Command("sbx", "exec", "-u", "root", sandbox, "sh", "-c", script)
+	var errb bytes.Buffer
+	cmd.Stderr = &errb
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("setting %s in %s inside sandbox %s: %w: %s",
+			key, persistentEnvFile, sandbox, err, strings.TrimSpace(errb.String()))
+	}
+	return nil
 }
 
 // Exists reports whether a sandbox with exactly this name is present.

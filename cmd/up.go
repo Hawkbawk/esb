@@ -74,6 +74,10 @@ agent does can touch your worktree.`,
 				return err
 			}
 
+			if err := sbx.AddPermanentEnvVar(label, "PORT", strconv.Itoa(sandboxPort)); err != nil {
+				return err
+			}
+
 			fmt.Printf("\nsandbox   %s\n", label)
 			fmt.Printf("url       https://%s.%s\n", label, cfg.Domain)
 			fmt.Printf("port      127.0.0.1:%d -> %d in sandbox\n", rt.HostPort, sandboxPort)

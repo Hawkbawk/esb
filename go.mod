@@ -3,6 +3,7 @@ module github.com/hawkbawk/esb
 go 1.26.3
 
 require (
+	al.essio.dev/pkg/shellescape v1.6.0
 	github.com/caddy-dns/desec v1.1.0
 	github.com/caddyserver/caddy/v2 v2.10.2
 	github.com/go-git/go-git/v5 v5.19.2

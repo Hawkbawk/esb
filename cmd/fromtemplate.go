@@ -276,6 +276,13 @@ func (opts *FromTemplateCommand) Run() error {
 		return err
 	}
 
+	return opts.routePort(sandboxName)
+}
+
+// routePort routes --port to the new sandbox and exports it as PORT inside
+// the sandbox, so whatever runs in there knows which port to listen on. It's
+// a no-op when no --port was given.
+func (opts *FromTemplateCommand) routePort(sandboxName string) error {
 	if opts.port == "" {
 		opts.verboseLog.Printf("no --port given, skipping route setup")
 		return nil
@@ -284,6 +291,12 @@ func (opts *FromTemplateCommand) Run() error {
 	if err != nil {
 		return fmt.Errorf("port %q is not a number", opts.port)
 	}
+
+	opts.verboseLog.Printf("setting PORT=%d inside sandbox %s", sandboxPort, sandboxName)
+	if err := sbx.AddPermanentEnvVar(sandboxName, "PORT", strconv.Itoa(sandboxPort)); err != nil {
+		return err
+	}
+
 	opts.verboseLog.Printf("routing host %s -> sandbox %s port %d", sandboxName, sandboxName, sandboxPort)
 	return RouteHost(sandboxName, sandboxName, sandboxPort)
 }
