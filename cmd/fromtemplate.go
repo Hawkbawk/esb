@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log"
@@ -28,6 +30,7 @@ func newFromTemplateCmd() *cobra.Command {
 		createArgs  []string
 		secrets     []string
 		verbose     bool
+		force       bool
 	)
 
 	cmd := &cobra.Command{
@@ -82,6 +85,7 @@ instructions during the build and are never baked into the resulting image layer
 				CreateArgs:  createArgs,
 				Secrets:     secrets,
 				Verbose:     verbose,
+				Force:       force,
 			})
 		},
 	}
@@ -97,6 +101,7 @@ instructions during the build and are never baked into the resulting image layer
 	f.StringArrayVarP(&createArgs, "create-arg", "c", nil, "extra argument for sbx create (repeatable)")
 	f.StringArrayVar(&secrets, "secret", nil, "secret to expose to the build, same syntax as docker build --secret: id=<name>,src=<path> or id=<name>,env=<var> (repeatable)")
 	f.BoolVarP(&verbose, "verbose", "v", false, "enable verbose logging to stderr")
+	f.BoolVarP(&force, "force", "f", false, "if a sandbox with the target name already exists, destroy it (and its routes) before creating the new one")
 	return cmd
 }
 
@@ -112,6 +117,16 @@ func builtImageID(ref string) (string, error) {
 		id = id[:12]
 	}
 	return id, nil
+}
+
+// randomSuffix returns a short random hex string used to disambiguate a
+// sandbox name when none was explicitly requested.
+func randomSuffix() (string, error) {
+	b := make([]byte, 4)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generating random suffix: %w", err)
+	}
+	return hex.EncodeToString(b), nil
 }
 
 // saveImage writes ref to tarPath, equivalent to `docker save -o tarPath ref`.
@@ -135,6 +150,7 @@ type FromTemplateOptions struct {
 	CreateArgs  []string
 	Secrets     []string
 	Verbose     bool
+	Force       bool
 }
 
 // runFromTemplate builds a Docker Sandbox template image from opts.Dir's
@@ -204,9 +220,43 @@ func runFromTemplate(opts FromTemplateOptions) error {
 	}
 	verboseLog.Printf("templateTag=%q gitSHA=%q", templateTag, gitSHA)
 
+	explicitName := name != ""
 	sandboxName := name
 	if sandboxName == "" {
 		sandboxName = baseName
+	}
+
+	exists, err := sbx.Exists(sandboxName)
+	if err != nil {
+		return err
+	}
+	if exists {
+		switch {
+		case !explicitName:
+			// No --name was given, so there's no reason to fight over the
+			// default: just pick a name that isn't taken.
+			suffix, err := randomSuffix()
+			if err != nil {
+				return err
+			}
+			newName := sandboxName + "-" + suffix
+			verboseLog.Printf("sandbox %q already exists; using %q instead", sandboxName, newName)
+			sandboxName = newName
+		case !opts.Force:
+			return fmt.Errorf("sandbox %q already exists; pass -f to replace it", sandboxName)
+		default:
+			fmt.Printf("Sandbox %q already exists, removing it ...\n", sandboxName)
+			_, client, err := load()
+			if err != nil {
+				return err
+			}
+			if _, err := client.RemoveSandbox(sandboxName); err != nil {
+				return err
+			}
+			if err := sbx.Run("rm", "--force", sandboxName); err != nil {
+				return err
+			}
+		}
 	}
 
 	for _, arg := range buildArgs {
