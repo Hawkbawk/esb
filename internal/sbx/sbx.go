@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -136,6 +137,27 @@ func AddPermanentEnvVar(sandbox, key, value string) error {
 			key, persistentEnvFile, sandbox, err, strings.TrimSpace(errb.String()))
 	}
 	return nil
+}
+
+// RunScript copies the script at localPath into sandbox and executes it
+// there with sh, removing the copy afterward. localPath may be relative
+// (resolved against the current working directory) or absolute.
+func RunScript(sandbox, localPath string) error {
+	absPath, err := filepath.Abs(localPath)
+	if err != nil {
+		return fmt.Errorf("resolving %s: %w", localPath, err)
+	}
+	if _, err := os.Stat(absPath); err != nil {
+		return fmt.Errorf("setup script %s: %w", localPath, err)
+	}
+
+	remotePath := "/tmp/" + filepath.Base(absPath)
+	if err := Run("cp", absPath, sandbox+":"+remotePath); err != nil {
+		return err
+	}
+	defer Run("exec", sandbox, "rm", "-f", remotePath)
+
+	return Run("exec", sandbox, "sh", remotePath)
 }
 
 // Exists reports whether a sandbox with exactly this name is present.

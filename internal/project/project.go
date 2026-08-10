@@ -28,6 +28,12 @@ type Config struct {
 	// is expected to be run from) or an absolute path. If empty, the
 	// Dockerfile directly inside the sandbox directory is used instead.
 	Dockerfile string `json:"dockerfile"`
+
+	// SetupScript is a shell script, either relative to the repo root (the
+	// CWD `from-template` is expected to be run from) or an absolute path,
+	// that's copied into the sandbox and run there once everything else in
+	// from-template has finished. If empty, no setup script is run.
+	SetupScript string `json:"setupScript"`
 }
 
 // LoadConfig reads dir/esb.json. The file is optional, so a missing one gives

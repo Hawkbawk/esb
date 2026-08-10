@@ -54,9 +54,13 @@ esb.json can also set "dockerfile" to use a Dockerfile other than the one
 directly inside the given directory. It's either a path relative to the repo
 root (the CWD from-template is expected to be run from) or an absolute path.
 
+esb.json can also set "setupScript" to a shell script, resolved the same way
+as "dockerfile", that's copied into the sandbox and run there once everything
+else in from-template has finished.
+
 Example:
 
-{"kits": ["./my-kit", "docker/kit-node:latest"], "dockerfile": "docker/Dockerfile.sandbox"}
+{"kits": ["./my-kit", "docker/kit-node:latest"], "dockerfile": "docker/Dockerfile.sandbox", "setupScript": "docker/setup.sh"}
 
 A WORKSPACE_DIR build argument is always sent to the Docker build process. This can be used
 to set the working directory inside the Docker container to match the same workspace location
@@ -275,8 +279,11 @@ func (opts *FromTemplateCommand) Run() error {
 	if err := opts.createSandbox(templateTag, sandboxName, proj.Kits); err != nil {
 		return err
 	}
+	if err := opts.routePort(sandboxName); err != nil {
+		return err
+	}
 
-	return opts.routePort(sandboxName)
+	return opts.runSetupScript(proj.SetupScript, sandboxName)
 }
 
 // routePort routes --port to the new sandbox and exports it as PORT inside
@@ -299,6 +306,20 @@ func (opts *FromTemplateCommand) routePort(sandboxName string) error {
 
 	opts.verboseLog.Printf("routing host %s -> sandbox %s port %d", sandboxName, sandboxName, sandboxPort)
 	return RouteHost(sandboxName, sandboxName, sandboxPort)
+}
+
+// runSetupScript runs the esb.json "setupScript" against sandboxName, if one
+// was given. The path is resolved the same way as the "dockerfile" key:
+// relative to the repo root (the CWD from-template is run from), or absolute.
+func (opts *FromTemplateCommand) runSetupScript(scriptPath, sandboxName string) error {
+	if scriptPath == "" {
+		opts.verboseLog.Printf("no setupScript given, skipping")
+		return nil
+	}
+
+	fmt.Printf("Running setup script %s in sandbox %q ...\n", scriptPath, sandboxName)
+	opts.verboseLog.Printf("+ sbx.RunScript(%s, %s)", sandboxName, scriptPath)
+	return sbx.RunScript(sandboxName, scriptPath)
 }
 
 // resolveDockerfile finds the Dockerfile to build from: the esb.json
