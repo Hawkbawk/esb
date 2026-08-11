@@ -1,6 +1,6 @@
 // Package project reads the per-repo bits `esb from-template` needs: the
-// optional esb.json next to the Dockerfile, and the git commit the image tag
-// gets pinned to.
+// optional .esb.json at the repo root, and the git commit the image tag gets
+// pinned to.
 package project
 
 import (
@@ -12,9 +12,9 @@ import (
 	"github.com/go-git/go-git/v5"
 )
 
-// ConfigName is the per-repo config file, expected inside the sandbox
-// directory alongside the Dockerfile.
-const ConfigName = "esb.json"
+// ConfigName is the per-repo config file, expected at the root of the
+// repository (the CWD `from-template` is expected to be run from).
+const ConfigName = ".esb.json"
 
 //go:generate go run ../../cmd/schemagen
 
@@ -42,8 +42,8 @@ type Config struct {
 	SetupScript string `json:"setupScript,omitempty"`
 }
 
-// LoadConfig reads dir/esb.json. The file is optional, so a missing one gives
-// back a zero Config rather than an error.
+// LoadConfig reads dir/.esb.json. The file is optional, so a missing one
+// gives back a zero Config rather than an error.
 func LoadConfig(dir string) (*Config, error) {
 	path := filepath.Join(dir, ConfigName)
 	f, err := os.Open(path)

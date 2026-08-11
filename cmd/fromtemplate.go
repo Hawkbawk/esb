@@ -43,18 +43,19 @@ Dockerfile, load it, and create a sandbox from it in one shot.
 Expects a .esb/ layout with a Dockerfile in it. The directory defaults to
 .esb in the current directory.
 
-An optional esb.json in that same directory lists the kits to pass to
-sbx create. Each entry is whatever --kit accepts: a local path, a URL,
-or an OCI reference. The ordering of kits is important. If one kit depends on another,
-its dependencies must be listed before it to ensure the install and setup scripts run in
-the correct order. Note that local paths are resolved relative to the repo root, not the location
-of the esb.json file, just like the dockerfile key.
+An optional .esb.json at the root of the repo (the CWD from-template is
+expected to be run from) lists the kits to pass to sbx create. Each entry is
+whatever --kit accepts: a local path, a URL, or an OCI reference. The
+ordering of kits is important. If one kit depends on another, its
+dependencies must be listed before it to ensure the install and setup
+scripts run in the correct order. Note that local paths are resolved
+relative to the repo root, just like the dockerfile key.
 
-esb.json can also set "dockerfile" to use a Dockerfile other than the one
+.esb.json can also set "dockerfile" to use a Dockerfile other than the one
 directly inside the given directory. It's either a path relative to the repo
-root (the CWD from-template is expected to be run from) or an absolute path.
+root or an absolute path.
 
-esb.json can also set "setupScript" to a shell script, resolved the same way
+.esb.json can also set "setupScript" to a shell script, resolved the same way
 as "dockerfile", that's copied into the sandbox and run there once everything
 else in from-template has finished.
 
@@ -220,13 +221,20 @@ func (opts *FromTemplateCommand) Run() error {
 		return fmt.Errorf("directory %q not found", opts.dir)
 	}
 
-	proj, err := project.LoadConfig(opts.dir)
+	absDir, err := filepath.Abs(opts.dir)
+	if err != nil {
+		return err
+	}
+	parentDir := filepath.Dir(absDir)
+	opts.verboseLog.Printf("absDir=%q parentDir=%q", absDir, parentDir)
+
+	proj, err := project.LoadConfig(parentDir)
 	if err != nil {
 		return err
 	}
 	opts.verboseLog.Printf("loaded project config: kits=%v dockerfile=%q", proj.Kits, proj.Dockerfile)
 
-	dockerfile, err := opts.resolveDockerfile(proj)
+	dockerfile, err := opts.resolveDockerfile(proj, parentDir)
 	if err != nil {
 		return err
 	}
@@ -234,13 +242,6 @@ func (opts *FromTemplateCommand) Run() error {
 	if err != nil {
 		return err
 	}
-
-	absDir, err := filepath.Abs(opts.dir)
-	if err != nil {
-		return err
-	}
-	parentDir := filepath.Dir(absDir)
-	opts.verboseLog.Printf("absDir=%q parentDir=%q", absDir, parentDir)
 
 	baseName := opts.tag
 	if baseName == "" {
@@ -308,8 +309,8 @@ func (opts *FromTemplateCommand) routePort(sandboxName string) error {
 	return RouteHost(sandboxName, sandboxName, sandboxPort)
 }
 
-// runSetupScript runs the esb.json "setupScript" against sandboxName, if one
-// was given. The path is resolved the same way as the "dockerfile" key:
+// runSetupScript runs the .esb.json "setupScript" against sandboxName, if
+// one was given. The path is resolved the same way as the "dockerfile" key:
 // relative to the repo root (the CWD from-template is run from), or absolute.
 func (opts *FromTemplateCommand) runSetupScript(scriptPath, sandboxName string) error {
 	if scriptPath == "" {
@@ -322,16 +323,16 @@ func (opts *FromTemplateCommand) runSetupScript(scriptPath, sandboxName string) 
 	return sbx.RunScript(sandboxName, scriptPath)
 }
 
-// resolveDockerfile finds the Dockerfile to build from: the esb.json
+// resolveDockerfile finds the Dockerfile to build from: the .esb.json
 // "dockerfile" override if set, or a Dockerfile directly inside opts.Dir.
-func (opts *FromTemplateCommand) resolveDockerfile(proj *project.Config) (string, error) {
+func (opts *FromTemplateCommand) resolveDockerfile(proj *project.Config, parentDir string) (string, error) {
 	dockerfile := filepath.Join(opts.dir, "Dockerfile")
 	if proj.Dockerfile != "" {
 		dockerfile = proj.Dockerfile
 	}
 	if _, err := os.Stat(dockerfile); err != nil {
 		if proj.Dockerfile != "" {
-			return "", fmt.Errorf("no Dockerfile at %q (from the %q key in %s)", dockerfile, "dockerfile", filepath.Join(opts.dir, project.ConfigName))
+			return "", fmt.Errorf("no Dockerfile at %q (from the %q key in %s)", dockerfile, "dockerfile", filepath.Join(parentDir, project.ConfigName))
 		}
 		return "", fmt.Errorf("no Dockerfile at %q\nfrom-template expects a Dockerfile directly inside the given directory", dockerfile)
 	}

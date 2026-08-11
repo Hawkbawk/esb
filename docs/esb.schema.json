@@ -21,6 +21,6 @@
   },
   "additionalProperties": false,
   "type": "object",
-  "title": "esb.json",
-  "description": "Per-repo config for `esb from-template`, read from esb.json next to the Dockerfile."
+  "title": ".esb.json",
+  "description": "Per-repo config for `esb from-template`, read from .esb.json at the repo root."
 }
