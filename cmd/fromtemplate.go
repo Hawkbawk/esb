@@ -207,7 +207,7 @@ func (opts *FromTemplateCommand) Run() error {
 	// Dockerfile change is visibly a different image.
 	gitSHA, err := project.GitShortSHA(parentDir)
 	if err != nil {
-		return fmt.Errorf("%q is not a git repository (needed to derive the image tag)", parentDir)
+		fmt.Printf("%q is not a git repository, skipping gitSHA resolution\n", parentDir)
 	}
 	opts.verboseLog.Printf("templateTag=%q gitSHA=%q", templateTag, gitSHA)
 
@@ -347,7 +347,10 @@ func (opts *FromTemplateCommand) buildImage(absDockerfile, parentDir, templateTa
 
 	fmt.Printf("Building %s:%s (and :latest) from %s ...\n", templateTag, gitSHA, absDockerfile)
 
-	buildCmdArgs := []string{"build", "-f", absDockerfile, "-t", templateTag + ":" + gitSHA, "-t", templateTag + ":latest"}
+	buildCmdArgs := []string{"build", "-f", absDockerfile, "-t", templateTag + ":latest"}
+	if gitSHA != "" {
+		buildCmdArgs = append(buildCmdArgs, "-t", templateTag+":"+gitSHA)
+	}
 	if opts.verbose {
 		buildCmdArgs = append(buildCmdArgs, "--progress", "plain")
 	}
