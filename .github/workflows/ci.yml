@@ -12,16 +12,9 @@ jobs:
       - uses: actions/checkout@v5
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
-      # doCheck is on for the esb package, so this also runs `go test
-      # ./internal/proxy/...` (the Caddyfile-render test) and exercises the
-      # vendorHash, catching a stale hash the same way a real dependency bump
-      # would.
+      # doCheck is on for the esb package, and buildGoModule's default
+      # checkPhase runs `go test ./...` (no subPackages set to narrow it), so
+      # this also exercises the full test suite, including the
+      # Caddyfile-render test and the vendorHash, catching a stale hash the
+      # same way a real dependency bump would.
       - run: nix build .#esb -L
-
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: DeterminateSystems/nix-installer-action@main
-      - uses: DeterminateSystems/magic-nix-cache-action@main
-      - run: nix develop --command go test ./...
