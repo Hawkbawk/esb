@@ -83,6 +83,13 @@ func TemplateImages() ([]TemplateImage, error) {
 	if err := json.Unmarshal(out.Bytes(), &parsed); err != nil {
 		return nil, fmt.Errorf("parsing sbx template ls --json output: %w", err)
 	}
+
+	for i := range parsed.Images {
+		if after, present := strings.CutPrefix(parsed.Images[i].Repository, "docker.io/library/"); present {
+			parsed.Images[i].Repository = after
+		}
+	}
+
 	return parsed.Images, nil
 }
 
@@ -100,8 +107,7 @@ func LoadedTemplateIdentities(templateTag string) ([]docker.ImageIdentity, error
 	seen := make(map[string]struct{})
 	var identities []docker.ImageIdentity
 	for _, img := range images {
-		// docker adds this prefix for some reason :(
-		if img.Repository != templateTag || img.Repository != "docker.io/library" + templateTag {
+		if img.Repository != templateTag {
 			continue
 		}
 		if _, ok := seen[img.ID]; ok {
