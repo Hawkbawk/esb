@@ -16,6 +16,8 @@ import (
 	"strings"
 
 	"al.essio.dev/pkg/shellescape"
+
+	"github.com/hawkbawk/esb/internal/docker"
 )
 
 // Run streams a sandbox command straight to the terminal, since these are
@@ -84,39 +86,37 @@ func TemplateImages() ([]TemplateImage, error) {
 	return parsed.Images, nil
 }
 
-// shortIDLen is the length of the image IDs docker sandbox reports in
-// `sbx template ls --json`. IDs are compared at this length so a full
-// 64-hex-char ID still matches the short form docker sandbox prints.
-const shortIDLen = 12
-
-// LoadedTemplateImage returns the first of ids that is already loaded into
-// docker sandbox as a template, or "" if none of them are. ids are given in
-// preference order, and may be either the short (12-hex-char) or full form.
-func LoadedTemplateImage(ids []string) (string, error) {
+// LoadedTemplateIdentities returns the docker.ImageIdentity of every docker
+// sandbox template image loaded under templateTag's repository, deduplicated
+// by image ID. There may be more than one if a previous from-template run
+// skipped loading a rebuild that landed on the same layers as an
+// already-loaded image.
+func LoadedTemplateIdentities(templateTag string) ([]docker.ImageIdentity, error) {
 	images, err := TemplateImages()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	loaded := make(map[string]struct{}, len(images))
+	seen := make(map[string]struct{})
+	var identities []docker.ImageIdentity
 	for _, img := range images {
-		loaded[shortID(img.ID)] = struct{}{}
-	}
-	for _, id := range ids {
-		if _, ok := loaded[shortID(id)]; ok {
-			return id, nil
+		if img.Repository != templateTag {
+			continue
 		}
-	}
-	return "", nil
-}
+		if _, ok := seen[img.ID]; ok {
+			continue
+		}
+		seen[img.ID] = struct{}{}
 
-// shortID truncates an image ID to the form docker sandbox reports.
-func shortID(id string) string {
-	id = strings.TrimPrefix(id, "sha256:")
-	if len(id) > shortIDLen {
-		return id[:shortIDLen]
+		ident, err := docker.InspectImage(img.ID)
+		if err != nil {
+			// docker sandbox knows about it but docker itself no longer
+			// has it (e.g. pruned); nothing to compare layers against.
+			continue
+		}
+		identities = append(identities, ident)
 	}
-	return id
+	return identities, nil
 }
 
 // persistentEnvFile is sourced by shells inside the sandbox, so anything

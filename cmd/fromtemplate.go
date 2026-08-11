@@ -15,6 +15,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/hawkbawk/esb/internal/docker"
 	"github.com/hawkbawk/esb/internal/project"
 	"github.com/hawkbawk/esb/internal/sbx"
 )
@@ -98,45 +99,6 @@ instructions during the build and are never baked into the resulting image layer
 	return cmd
 }
 
-// imageIdentity is what we know about a local docker image: the ID docker
-// gave it, plus the digests of its filesystem layers.
-//
-// The ID alone can't tell us whether two builds produced the same image:
-// buildkit stamps a fresh timestamp into the image config on every export,
-// so even a fully cached rebuild gets a new ID over a byte-identical
-// filesystem. The layer digests don't move, so they're what we compare.
-type imageIdentity struct {
-	// id is the short (12-hex-char) form, matching what docker sandbox
-	// reports in `sbx template ls --json`.
-	id     string
-	layers []string
-}
-
-// sameContent reports whether other has the same filesystem layers as ident,
-// i.e. whether loading one into docker sandbox would be equivalent to
-// loading the other. An identity with no layers never matches anything,
-// since that means we failed to learn what the image contains.
-func (ident imageIdentity) sameContent(other imageIdentity) bool {
-	return len(ident.layers) > 0 && slices.Equal(ident.layers, other.layers)
-}
-
-// inspectImage reads the ID and layer digests docker has for ref.
-func inspectImage(ref string) (imageIdentity, error) {
-	out, err := exec.Command("docker", "image", "inspect", "--format", "{{.Id}}{{range .RootFS.Layers}} {{.}}{{end}}", ref).Output()
-	if err != nil {
-		return imageIdentity{}, fmt.Errorf("docker image inspect %s: %w", ref, err)
-	}
-	fields := strings.Fields(string(out))
-	if len(fields) == 0 {
-		return imageIdentity{}, fmt.Errorf("docker image inspect %s: no output", ref)
-	}
-	id := strings.TrimPrefix(fields[0], "sha256:")
-	if len(id) > 12 {
-		id = id[:12]
-	}
-	return imageIdentity{id: id, layers: fields[1:]}, nil
-}
-
 // randomSuffix returns a short random hex string used to disambiguate a
 // sandbox name when none was explicitly requested.
 func randomSuffix() (string, error) {
@@ -145,14 +107,6 @@ func randomSuffix() (string, error) {
 		return "", fmt.Errorf("generating random suffix: %w", err)
 	}
 	return hex.EncodeToString(b), nil
-}
-
-// saveImage writes ref to tarPath, equivalent to `docker save -o tarPath ref`.
-func saveImage(ref, tarPath string) error {
-	cmd := exec.Command("docker", "save", "-o", tarPath, ref)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
 }
 
 // FromTemplateCommand holds the CLI arguments for the from-template command
@@ -263,18 +217,10 @@ func (opts *FromTemplateCommand) Run() error {
 	}
 	opts.verboseLog.Printf("absDockerfile=%q sandboxName=%q", absDockerfile, sandboxName)
 
-	previous, err := inspectImage(templateTag + ":latest")
-	if err != nil {
-		opts.verboseLog.Printf("no previous %s:latest to compare against: %v", templateTag, err)
-		previous = imageIdentity{}
-	} else {
-		opts.verboseLog.Printf("previous image ID=%q layers=%d", previous.id, len(previous.layers))
-	}
-
 	if err := opts.buildImage(absDockerfile, parentDir, templateTag, gitSHA); err != nil {
 		return err
 	}
-	if err := opts.loadTemplateImage(templateTag, previous); err != nil {
+	if err := opts.loadTemplateImage(templateTag); err != nil {
 		return err
 	}
 	if err := opts.createSandbox(templateTag, sandboxName, proj.Kits); err != nil {
@@ -425,34 +371,39 @@ func (opts *FromTemplateCommand) buildImage(absDockerfile, parentDir, templateTa
 }
 
 // loadTemplateImage saves templateTag:latest and loads it into docker
-// sandbox, unless the same content is already loaded.
+// sandbox, unless docker sandbox already has a template image for
+// templateTag whose layers match what was just built.
 //
-// previous is what templateTag:latest pointed at before the build, as
-// captured by Run.
-func (opts *FromTemplateCommand) loadTemplateImage(templateTag string, previous imageIdentity) error {
-	built, err := inspectImage(templateTag + ":latest")
+// This looks at what's actually loaded right now rather than remembering
+// what a previous run built, so it stays correct across any number of
+// consecutive builds that all produce the same layers: each run's image ID
+// differs (buildkit stamps a fresh timestamp into the config), but as long
+// as one of the loaded images for this template shares those layers, the
+// save/load cycle is redundant.
+func (opts *FromTemplateCommand) loadTemplateImage(templateTag string) error {
+	built, err := docker.InspectImage(templateTag + ":latest")
 	if err != nil {
 		return err
 	}
-	opts.verboseLog.Printf("built image ID=%q layers=%d", built.id, len(built.layers))
+	opts.verboseLog.Printf("built image ID=%q layers=%d", built.ID, len(built.Layers))
 
-	// The built ID is worth checking on its own in case the build did come
-	// out reproducible; the previous ID only counts if the rebuild landed
-	// on the same layers.
-	candidates := []string{built.id}
-	if built.sameContent(previous) {
-		opts.verboseLog.Printf("rebuild matched previous layers, checking for ID %q", previous.id)
-		candidates = append(candidates, previous.id)
-	}
-
-	loaded, err := sbx.LoadedTemplateImage(candidates)
+	loadedIdentities, err := sbx.LoadedTemplateIdentities(templateTag)
 	if err != nil {
 		return err
 	}
-	opts.verboseLog.Printf("loaded template image from candidates %v: %q", candidates, loaded)
+	opts.verboseLog.Printf("found %d loaded image(s) for template %q", len(loadedIdentities), templateTag)
 
-	if loaded != "" {
-		fmt.Printf("Template image %s is already loaded into docker sandbox, skipping save/load ...\n", loaded)
+	var matched string
+
+	i := slices.IndexFunc(loadedIdentities, func(ident docker.ImageIdentity) bool {
+		return ident.ID == built.ID || built.SameContent(ident)
+	})
+	if i != -1 {
+		matched = loadedIdentities[i].ID
+	}
+
+	if matched != "" {
+		fmt.Printf("Template image %s is already loaded into docker sandbox, skipping save/load ...\n", matched)
 		return nil
 	}
 
@@ -466,7 +417,7 @@ func (opts *FromTemplateCommand) loadTemplateImage(templateTag string, previous 
 
 	fmt.Printf("Saving image to %s ...\n", tarPath)
 	opts.verboseLog.Printf("+ docker save -o %s %s:latest", tarPath, templateTag)
-	if err := saveImage(templateTag+":latest", tarPath); err != nil {
+	if err := docker.SaveImage(templateTag+":latest", tarPath); err != nil {
 		return fmt.Errorf("docker save: %w", err)
 	}
 
