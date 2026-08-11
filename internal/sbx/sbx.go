@@ -100,7 +100,8 @@ func LoadedTemplateIdentities(templateTag string) ([]docker.ImageIdentity, error
 	seen := make(map[string]struct{})
 	var identities []docker.ImageIdentity
 	for _, img := range images {
-		if img.Repository != templateTag {
+		// docker adds this prefix for some reason :(
+		if img.Repository != templateTag || img.Repository != "docker.io/library" + templateTag {
 			continue
 		}
 		if _, ok := seen[img.ID]; ok {
