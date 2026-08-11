@@ -1,0 +1,29 @@
+schemaVersion: "2"
+kind: mixin
+name: esb-networking
+version: 1.0.0
+displayName: esb networking
+description: Explains how sandboxes routed by esb are reached, so the agent starts its app on the right port and interface.
+agentInstructions:
+  content: |
+    This sandbox is routed by esb (https://github.com/hawkbawk/esb). esb gives
+    it a real hostname behind a trusted HTTPS certificate, proxied through a
+    single published host port:
+
+        https://<label>.<domain>  ->  Caddy on the host  ->  127.0.0.1:<hostPort> in this sandbox
+
+    Only one container port is published per sandbox, so only one app can be
+    reached this way. Two things matter for that app to actually be reachable:
+
+    - **Listen on `$PORT` if it's set.** esb sets `PORT` inside the sandbox to
+      the container port that was routed. If your app defaults to a different
+      port (3000, 8080, etc.), read `$PORT` first and fall back to your
+      default only when it's unset.
+    - **Bind to `0.0.0.0`, not `127.0.0.1` or `localhost`.** The host port
+      forward reaches your app through the sandbox's network interface, not
+      its loopback. A server bound only to loopback inside the sandbox is
+      unreachable from outside it even though the port mapping looks correct.
+
+    The URL is real, publicly-trusted HTTPS — no self-signed cert to trust
+    and no need to disable TLS verification when calling it from a browser or
+    from another sandbox.
