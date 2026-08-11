@@ -56,6 +56,16 @@ Labels are sanitized into a single DNS label, because the wildcard cert covers `
 
 Host ports are derived from the label rather than left ephemeral, and a label keeps its port forever once assigned. That way a route stays correct across sandbox restarts.
 
+## Kits.
+
+`kits/esb-networking` is a Docker Sandbox [mixin kit](https://docs.docker.com/ai/sandboxes/customize/kit-reference/) that tells the agent inside a sandbox how esb routing works: read `$PORT` before falling back to a default, and bind to `0.0.0.0` rather than loopback, since the host port forward reaches the sandbox's network interface, not its loopback. Reference it locally in `.esb.json`:
+
+```json
+{"kits": ["https://raw.githubusercontent.com/hawkbawk/esb/main/kits/esb-networking", ...]}
+```
+
+or point `--kit` at it directly on `sbx create`.
+
 ## Installing it.
 
 Add the flake as an input:
