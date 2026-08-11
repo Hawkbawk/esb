@@ -40,8 +40,8 @@ func main() {
 
 	schema := r.Reflect(&project.Config{})
 	schema.ID = "https://hawkbawk.github.io/esb/esb.schema.json"
-	schema.Title = "esb.json"
-	schema.Description = "Per-repo config for `esb from-template`, read from esb.json next to the Dockerfile."
+	schema.Title = ".esb.json"
+	schema.Description = "Per-repo config for `esb from-template`, read from .esb.json at the repo root."
 	schema.Properties.Set("$schema", &jsonschema.Schema{
 		Type:        "string",
 		Description: "Path or URL to this JSON schema.",
