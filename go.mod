@@ -7,6 +7,7 @@ require (
 	github.com/caddy-dns/desec v1.1.0
 	github.com/caddyserver/caddy/v2 v2.10.2
 	github.com/go-git/go-git/v5 v5.19.2
+	github.com/invopop/jsonschema v0.14.0
 	github.com/miekg/dns v1.1.72
 	github.com/spf13/cobra v1.10.2
 	google.golang.org/grpc v1.83.0
@@ -33,7 +34,9 @@ require (
 	github.com/aryann/difflib v0.0.0-20210328193216-ff5ff6dc229b // indirect
 	github.com/aws/aws-sdk-go-v2/config v1.32.31 // indirect
 	github.com/aws/smithy-go v1.27.4 // indirect
+	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
+	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/caddyserver/certmagic v0.25.1 // indirect
 	github.com/caddyserver/zerossl v0.1.4 // indirect
 	github.com/ccoveille/go-safecast v1.6.1 // indirect
@@ -95,6 +98,7 @@ require (
 	github.com/mitchellh/go-ps v1.0.0 // indirect
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
+	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58 // indirect
 	github.com/pires/go-proxyproto v0.8.1 // indirect
 	github.com/pjbgf/sha1cd v0.6.0 // indirect
@@ -154,6 +158,7 @@ require (
 	go.uber.org/zap/exp v0.3.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
 	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/crypto/x509roots/fallback v0.0.0-20250305170421-49bf5b80c810 // indirect
 	golang.org/x/exp v0.0.0-20260603202125-055de637280b // indirect

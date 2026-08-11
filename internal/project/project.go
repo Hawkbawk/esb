@@ -16,24 +16,30 @@ import (
 // directory alongside the Dockerfile.
 const ConfigName = "esb.json"
 
-// Config is the schema of esb.json.
+//go:generate go run ../../cmd/schemagen
+
+// Config is the schema of esb.json. Its JSON Schema, for editor autocomplete,
+// is generated from this struct (including these doc comments) by
+// cmd/schemagen into docs/esb.schema.json, published via GitHub Pages at
+// https://hawkbawk.github.io/esb/esb.schema.json. Run `go generate ./...`
+// after changing this struct to regenerate it.
 type Config struct {
 	// Kits are passed straight through to `sbx create --kit`, so each entry
 	// is whatever that flag accepts: a local path, a URL, or an OCI
 	// reference.
-	Kits []string `json:"kits"`
+	Kits []string `json:"kits,omitempty"`
 
 	// Dockerfile overrides the Dockerfile used to build the template image.
 	// It's either a path relative to the repo root (the CWD `from-template`
 	// is expected to be run from) or an absolute path. If empty, the
 	// Dockerfile directly inside the sandbox directory is used instead.
-	Dockerfile string `json:"dockerfile"`
+	Dockerfile string `json:"dockerfile,omitempty"`
 
 	// SetupScript is a shell script, either relative to the repo root (the
 	// CWD `from-template` is expected to be run from) or an absolute path,
 	// that's copied into the sandbox and run there once everything else in
 	// from-template has finished. If empty, no setup script is run.
-	SetupScript string `json:"setupScript"`
+	SetupScript string `json:"setupScript,omitempty"`
 }
 
 // LoadConfig reads dir/esb.json. The file is optional, so a missing one gives
