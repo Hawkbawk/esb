@@ -132,6 +132,16 @@ in
         Defaults to where sops-nix puts it.
       '';
     };
+
+    useBinaryCache = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Trust the `hawkbawk-esb` Cachix cache so `nix build`/rebuilds pull the
+        prebuilt esb package instead of compiling it locally. Off by default. Only enable
+        if you trust the cache and want to avoid recompilation.
+      '';
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -149,6 +159,13 @@ in
         message = "services.esb.portRange.from must be below portRange.to.";
       }
     ];
+
+    nix.settings = lib.mkIf cfg.useBinaryCache {
+      substituters = [ "https://hawkbawk-esb.cachix.org" ];
+      trusted-public-keys = [
+        "hawkbawk-esb.cachix.org-1:dXmAeKAaEubJoTJwHq/xeTyZNOM3i32V1cWoSuAGWt8="
+      ];
+    };
 
     environment = {
       systemPackages = [ cfg.package ];

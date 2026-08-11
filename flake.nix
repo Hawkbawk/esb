@@ -1,15 +1,6 @@
 {
   description = "esb - extended sandbox: name-based HTTPS routing for Docker Sandbox microVMs";
 
-  # Lets `nix build`/`nix run` on this flake pull prebuilt artifacts from
-  # Cachix instead of rebuilding, for anyone who trusts this substituter.
-  nixConfig = {
-    extra-substituters = [ "https://hawkbawk-esb.cachix.org" ];
-    extra-trusted-public-keys = [
-      "hawkbawk-esb.cachix.org-1:dXmAeKAaEubJoTJwHq/xeTyZNOM3i32V1cWoSuAGWt8="
-    ];
-  };
-
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
   outputs =
