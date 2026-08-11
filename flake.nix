@@ -6,11 +6,12 @@
   outputs =
     { self, nixpkgs, ... }:
     let
+      # Darwin-only for now: the daemon binds macOS-specific loopback alias and
+      # DNS resolver mechanisms (see internal/netalias), so there's no Linux
+      # support to build or cache yet.
       systems = [
         "aarch64-darwin"
         "x86_64-darwin"
-        "aarch64-linux"
-        "x86_64-linux"
       ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
 
@@ -49,7 +50,7 @@
             homepage = "https://github.com/hawkbawk/esb";
             license = lib.licenses.mit;
             mainProgram = "esb";
-            platforms = lib.platforms.unix;
+            platforms = lib.platforms.darwin;
           };
         });
     in
