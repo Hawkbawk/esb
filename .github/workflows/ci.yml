@@ -7,7 +7,9 @@ on:
 
 jobs:
   nix-build:
-    runs-on: ubuntu-latest
+    # esb is darwin-only for now (see flake.nix), so validate on the same
+    # platform the package actually targets.
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v5
       - uses: DeterminateSystems/nix-installer-action@main
