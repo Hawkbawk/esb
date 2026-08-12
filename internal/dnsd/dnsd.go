@@ -23,14 +23,13 @@ type Server struct {
 	servers []*dns.Server
 }
 
-func New(domain, listenIP string) (*Server, error) {
-	ip := net.ParseIP(listenIP)
-	if ip == nil || ip.To4() == nil {
+func New(domain string, listenIP net.IP) (*Server, error) {
+	if listenIP == nil || listenIP.To4() == nil {
 		return nil, fmt.Errorf("listen address %q is not an IPv4 address", listenIP)
 	}
 	return &Server{
 		domain: dns.Fqdn(strings.ToLower(domain)),
-		ip:     ip.To4(),
+		ip:     listenIP,
 	}, nil
 }
 
@@ -40,10 +39,10 @@ func New(domain, listenIP string) (*Server, error) {
 // Both 127.0.0.1 (where /etc/resolver points the host) and the loopback alias
 // (where sandbox microVMs reach us) have to be bound. The alias does not
 // survive a reboot and is created by the daemon just before this runs.
-func (s *Server) Start(port int, addrs ...string) error {
+func (s *Server) Start(port int, addrs ...net.IP) error {
 	for _, addr := range addrs {
 		for _, netw := range []string{"udp", "tcp"} {
-			if err := s.listen(netw, net.JoinHostPort(addr, fmt.Sprint(port))); err != nil {
+			if err := s.listen(netw, net.JoinHostPort(addr.String(), fmt.Sprint(port))); err != nil {
 				s.Stop()
 				return err
 			}

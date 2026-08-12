@@ -16,14 +16,14 @@ import (
 // ifconfig can return before the address is actually usable, and a bind a
 // fraction of a second too early fails with "can't assign requested address",
 // so poll until it really shows up.
-func Ensure(addr string) error {
+func Ensure(addr net.IP) error {
 	if present(addr) {
 		return nil
 	}
 
 	// Already-exists is not an error worth reporting; the poll below is the
 	// real check either way.
-	cmd := exec.Command("/sbin/ifconfig", "lo0", "alias", addr, "255.255.255.255")
+	cmd := exec.Command("/sbin/ifconfig", "lo0", "alias", addr.String(), "255.255.255.255")
 	out, err := cmd.CombinedOutput()
 
 	deadline := time.Now().Add(5 * time.Second)
@@ -40,7 +40,7 @@ func Ensure(addr string) error {
 	return fmt.Errorf("lo0 alias %s did not come up within 5s", addr)
 }
 
-func present(addr string) bool {
+func present(addr net.IP) bool {
 	iface, err := net.InterfaceByName("lo0")
 	if err != nil {
 		return false
@@ -50,7 +50,7 @@ func present(addr string) bool {
 		return false
 	}
 	for _, a := range addrs {
-		if ipnet, ok := a.(*net.IPNet); ok && ipnet.IP.String() == addr {
+		if ipnet, ok := a.(*net.IPNet); ok && ipnet.IP.Equal(addr) {
 			return true
 		}
 	}

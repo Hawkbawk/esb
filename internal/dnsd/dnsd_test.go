@@ -12,7 +12,7 @@ import (
 func start(t *testing.T) int {
 	t.Helper()
 
-	s, err := New("sbx.example.dedyn.io", "192.168.255.253")
+	s, err := New("sbx.example.dedyn.io", net.IPv4(192, 168, 255, 253))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,7 +25,7 @@ func start(t *testing.T) int {
 	port := pc.LocalAddr().(*net.UDPAddr).Port
 	_ = pc.Close()
 
-	if err := s.Start(port, "127.0.0.1"); err != nil {
+	if err := s.Start(port, net.IPv4(127, 0, 0, 1)); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(s.Stop)

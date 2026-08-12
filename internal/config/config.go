@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"os"
 	"path/filepath"
 )
@@ -29,7 +30,7 @@ type Config struct {
 
 	// ListenAddress is the loopback alias that `<label>.<domain>` resolves to
 	// and that Caddy binds 443 on.
-	ListenAddress string `json:"listenAddress"`
+	ListenAddress net.IP `json:"listenAddress"`
 
 	// DNSPort is not 53, because /etc/resolver files can name a port and
 	// binding 53 would fight with everything else on the machine.
@@ -46,8 +47,8 @@ type Config struct {
 }
 
 func (c *Config) applyDefaults() {
-	if c.ListenAddress == "" {
-		c.ListenAddress = "192.168.255.253"
+	if c.ListenAddress == nil {
+		c.ListenAddress = net.IPv4(192, 168, 255, 253)
 	}
 	if c.DNSPort == 0 {
 		c.DNSPort = 19353

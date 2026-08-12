@@ -75,7 +75,7 @@ func Run(cfg *config.Config) error {
 	}
 	// 127.0.0.1 is where /etc/resolver/<domain> points the host resolver; the
 	// alias is where sandbox microVMs reach us.
-	if err := dnsServer.Start(cfg.DNSPort, "127.0.0.1", cfg.ListenAddress); err != nil {
+	if err := dnsServer.Start(cfg.DNSPort, net.IPv4(127, 0, 0, 1), cfg.ListenAddress); err != nil {
 		return err
 	}
 	defer dnsServer.Stop()

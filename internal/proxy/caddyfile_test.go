@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"net"
 	"strings"
 	"testing"
 
@@ -14,7 +15,7 @@ import (
 func testConfig() *config.Config {
 	return &config.Config{
 		Domain:        "sbx.example.dedyn.io",
-		ListenAddress: "192.168.255.253",
+		ListenAddress: net.IPv4(192, 168, 255, 253),
 		StateDir:      "/tmp/esb-test",
 		ACMEEmail:     "me@example.com",
 	}
