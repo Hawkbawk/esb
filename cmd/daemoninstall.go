@@ -13,14 +13,14 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/hawkbawk/esb/internal/config"
-	"github.com/hawkbawk/esb/internal/netalias"
+	"github.com/hawkbawk/usher/internal/config"
+	"github.com/hawkbawk/usher/internal/netalias"
 )
 
 // launchdLabel deliberately differs from nix-darwin's own label
-// ("org.nixos.esb-daemon") so the two never fight over the same job if
+// ("org.nixos.usher-daemon") so the two never fight over the same job if
 // someone runs this against a nix-managed host anyway.
-const launchdLabel = "com.hawkbawk.esb.daemon"
+const launchdLabel = "com.hawkbawk.usher.daemon"
 
 var plistTemplate = template.Must(template.New("plist").Parse(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -38,9 +38,9 @@ var plistTemplate = template.Must(template.New("plist").Parse(`<?xml version="1.
 	<key>KeepAlive</key>
 	<true/>
 	<key>StandardOutPath</key>
-	<string>{{.StateDir}}/log/esb.log</string>
+	<string>{{.StateDir}}/log/usher.log</string>
 	<key>StandardErrorPath</key>
-	<string>{{.StateDir}}/log/esb.err.log</string>
+	<string>{{.StateDir}}/log/usher.err.log</string>
 	<key>EnvironmentVariables</key>
 	<dict>
 		<key>HOME</key>
@@ -64,15 +64,15 @@ func newDaemonInstallCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "install",
-		Short: "Install the daemon component of esb",
-		Long: `Install and start the esb daemon in the background.
+		Short: "Install the daemon component of usher",
+		Long: `Install and start the usher daemon in the background.
 
 Creates a configuration file, adds the /etc/resolver/<domain> file, brings up the
 loopback alias, and registers a launchd job that starts the daemon at boot.
 
 Must be run as root, since it writes to /etc and /Library/LaunchDaemons.
 
-If you installed esb via nix, use the nix-darwin and home-manager modules instead of this command`,
+If you installed usher via nix, use the nix-darwin and home-manager modules instead of this command`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if os.Geteuid() != 0 {
@@ -80,7 +80,7 @@ If you installed esb via nix, use the nix-darwin and home-manager modules instea
 			}
 
 			if managed, detail := installedViaNix(); managed {
-				return fmt.Errorf("esb looks like it's managed by nix-darwin (%s); use services.esb in your darwin configuration instead of `esb daemon install`", detail)
+				return fmt.Errorf("usher looks like it's managed by nix-darwin (%s); use services.usher in your darwin configuration instead of `usher daemon install`", detail)
 			}
 
 			if domain == "" || strings.Contains(domain, "CHANGEME") {
@@ -129,7 +129,7 @@ If you installed esb via nix, use the nix-darwin and home-manager modules instea
 				return err
 			}
 
-			fmt.Printf("esb daemon installed and running (label %s)\n", launchdLabel)
+			fmt.Printf("usher daemon installed and running (label %s)\n", launchdLabel)
 			return nil
 		},
 	}
@@ -138,16 +138,16 @@ If you installed esb via nix, use the nix-darwin and home-manager modules instea
 	cmd.Flags().StringVar(&tokenFile, "token-file", "", "file containing the deSEC API token (required)")
 	cmd.Flags().StringVar(&acmeEmail, "acme-email", "", "optional ACME account email for certificate expiry notices")
 	cmd.Flags().IPVar(&listenAddress, "listen-address", net.IPv4(192, 168, 255, 253), "loopback alias that <label>.<domain> resolves to")
-	cmd.Flags().IntVar(&dnsPort, "dns-port", 19353, "port the esb DNS server listens on")
-	cmd.Flags().StringVar(&stateDir, "state-dir", "/usr/local/var/esb", "directory holding the route table, ACME storage, and logs")
-	cmd.Flags().IntVar(&portMin, "port-min", 30000, "lowest host port esb will publish a sandbox on")
-	cmd.Flags().IntVar(&portMax, "port-max", 39999, "highest host port esb will publish a sandbox on")
+	cmd.Flags().IntVar(&dnsPort, "dns-port", 19353, "port the usher DNS server listens on")
+	cmd.Flags().StringVar(&stateDir, "state-dir", "/usr/local/var/usher", "directory holding the route table, ACME storage, and logs")
+	cmd.Flags().IntVar(&portMin, "port-min", 30000, "lowest host port usher will publish a sandbox on")
+	cmd.Flags().IntVar(&portMax, "port-max", 39999, "highest host port usher will publish a sandbox on")
 
 	return cmd
 }
 
-// installedViaNix reports whether esb's config is being supplied by the
-// nix-darwin module, which manages /etc/esb/config.json as a symlink into the
+// installedViaNix reports whether usher's config is being supplied by the
+// nix-darwin module, which manages /etc/usher/config.json as a symlink into the
 // nix store. Running this installer on top of that would fight the module
 // for the same files and launchd job.
 func installedViaNix() (bool, string) {
@@ -155,8 +155,8 @@ func installedViaNix() (bool, string) {
 	if err == nil && strings.Contains(real, "/nix/store/") {
 		return true, real
 	}
-	if _, err := os.Stat("/Library/LaunchDaemons/org.nixos.esb-daemon.plist"); err == nil {
-		return true, "/Library/LaunchDaemons/org.nixos.esb-daemon.plist"
+	if _, err := os.Stat("/Library/LaunchDaemons/org.nixos.usher-daemon.plist"); err == nil {
+		return true, "/Library/LaunchDaemons/org.nixos.usher-daemon.plist"
 	}
 	return false, ""
 }

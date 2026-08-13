@@ -7,16 +7,16 @@ on:
 
 jobs:
   nix-build:
-    # esb is darwin-only for now (see flake.nix), so validate on the same
+    # usher is darwin-only for now (see flake.nix), so validate on the same
     # platform the package actually targets.
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v5
       - uses: DeterminateSystems/nix-installer-action@main
       - uses: DeterminateSystems/magic-nix-cache-action@main
-      # doCheck is on for the esb package, and buildGoModule's default
+      # doCheck is on for the usher package, and buildGoModule's default
       # checkPhase runs `go test ./...` (no subPackages set to narrow it), so
       # this also exercises the full test suite, including the
       # Caddyfile-render test and the vendorHash, catching a stale hash the
       # same way a real dependency bump would.
-      - run: nix build .#esb -L
+      - run: nix build .#usher -L

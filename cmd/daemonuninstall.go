@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/hawkbawk/esb/internal/config"
+	"github.com/hawkbawk/usher/internal/config"
 )
 
 func newDaemonUninstallCmd() *cobra.Command {
@@ -17,8 +17,8 @@ func newDaemonUninstallCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "uninstall",
 		Aliases: []string{"rm", "delete"},
-		Short:   "Uninstall the daemon component of esb",
-		Long: `Stop and remove the esb daemon installed by "esb daemon install".
+		Short:   "Uninstall the daemon component of usher",
+		Long: `Stop and remove the usher daemon installed by "usher daemon install".
 
 Unloads and deletes the launchd job. With --purge, also removes
 /etc/resolver/<domain>, the config file, and the state directory (routes,
@@ -27,7 +27,7 @@ Caddy storage, logs).
 Must be run as root, since it removes files from /etc and
 /Library/LaunchDaemons.
 
-If you installed esb via nix, use the nix-darwin module instead of this
+If you installed usher via nix, use the nix-darwin module instead of this
 command.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -36,7 +36,7 @@ command.`,
 			}
 
 			if managed, detail := installedViaNix(); managed {
-				return fmt.Errorf("esb looks like it's managed by nix-darwin (%s); use services.esb in your darwin configuration instead of `esb daemon uninstall`", detail)
+				return fmt.Errorf("usher looks like it's managed by nix-darwin (%s); use services.usher in your darwin configuration instead of `usher daemon uninstall`", detail)
 			}
 
 			if err := uninstallLaunchdJob(); err != nil {
@@ -64,7 +64,7 @@ command.`,
 				}
 			}
 
-			fmt.Println("esb daemon uninstalled")
+			fmt.Println("usher daemon uninstalled")
 			return nil
 		},
 	}

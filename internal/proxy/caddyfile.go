@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/hawkbawk/esb/internal/config"
-	"github.com/hawkbawk/esb/internal/route"
+	"github.com/hawkbawk/usher/internal/config"
+	"github.com/hawkbawk/usher/internal/route"
 )
 
 // Caddyfile renders the whole proxy config from the current route table.
@@ -38,13 +38,16 @@ func Caddyfile(cfg *config.Config, routes []route.Route) string {
 	for _, r := range routes {
 		fmt.Fprintf(&b, "\n\t@%s host %s.%s\n", r.Host, r.Host, cfg.Domain)
 		fmt.Fprintf(&b, "\thandle @%s {\n", r.Host)
-		fmt.Fprintf(&b, "\t\treverse_proxy 127.0.0.1:%d {\n", r.HostPort)
+		// The adapter decided the upstream. An orb route dials a
+		// <machine>.orb.local name rather than an address, so that Caddy
+		// re-resolves it and the route survives the VM restarting on a new IP.
+		fmt.Fprintf(&b, "\t\treverse_proxy %s {\n", r.Upstream)
 
 		b.WriteString("\t\t\theader_up X-Forwarded-Proto https\n\t\t}\n\t}\n")
 	}
 
 	// Unmatched handle, so it must come last.
-	b.WriteString("\n\thandle {\n\t\trespond \"No sandbox is routed at {host}. Create one with: esb up <label> <sandbox-port> <workspace>\" 404\n\t}\n")
+	b.WriteString("\n\thandle {\n\t\trespond \"Nothing is routed at {host}. Add it with: usher up <machine> <port> <hostname>\" 404\n\t}\n")
 	b.WriteString("}\n")
 
 	return b.String()

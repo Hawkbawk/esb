@@ -5,17 +5,17 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/hawkbawk/esb/internal/config"
-	"github.com/hawkbawk/esb/internal/daemon"
-	"github.com/hawkbawk/esb/internal/proxy"
-	"github.com/hawkbawk/esb/internal/route"
+	"github.com/hawkbawk/usher/internal/config"
+	"github.com/hawkbawk/usher/internal/daemon"
+	"github.com/hawkbawk/usher/internal/proxy"
+	"github.com/hawkbawk/usher/internal/route"
 )
 
 func newDaemonCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "daemon",
 		Short: "Run the DNS server and HTTPS proxy in the foreground",
-		Long: `Run the esb daemon in the foreground.
+		Long: `Run the usher daemon in the foreground.
 
 This is what the launchd job starts. It needs root: it adds the loopback
 alias, binds 443, and reads the deSEC token.`,

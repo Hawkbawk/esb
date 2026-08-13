@@ -2,15 +2,15 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.2
 // - protoc             v7.35.1
-// source: esb/v1/esb.proto
+// source: usher/v1/usher.proto
 
-// Package esb.v1 is the wire between the esb CLI and the esb daemon.
+// Package usher.v1 is the wire between the usher CLI and the usher daemon.
 //
 // The daemon owns the route table and the Caddy config; the CLI only asks it
-// for changes. That is why `esb up` needs no sudo and why there is no shared
+// for changes. That is why `usher up` needs no sudo and why there is no shared
 // directory of config fragments for the two halves to disagree about.
 
-package esbv1
+package usherv1
 
 import (
 	context "context"
@@ -25,10 +25,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	RouteService_ListRoutes_FullMethodName          = "/esb.v1.RouteService/ListRoutes"
-	RouteService_UpsertRoute_FullMethodName         = "/esb.v1.RouteService/UpsertRoute"
-	RouteService_RemoveRoute_FullMethodName         = "/esb.v1.RouteService/RemoveRoute"
-	RouteService_RemoveSandboxRoutes_FullMethodName = "/esb.v1.RouteService/RemoveSandboxRoutes"
+	RouteService_ListRoutes_FullMethodName          = "/usher.v1.RouteService/ListRoutes"
+	RouteService_UpsertRoute_FullMethodName         = "/usher.v1.RouteService/UpsertRoute"
+	RouteService_RemoveRoute_FullMethodName         = "/usher.v1.RouteService/RemoveRoute"
+	RouteService_RemoveMachineRoutes_FullMethodName = "/usher.v1.RouteService/RemoveMachineRoutes"
 )
 
 // RouteServiceClient is the client API for RouteService service.
@@ -37,10 +37,10 @@ const (
 type RouteServiceClient interface {
 	ListRoutes(ctx context.Context, in *ListRoutesRequest, opts ...grpc.CallOption) (*ListRoutesResponse, error)
 	UpsertRoute(ctx context.Context, in *UpsertRouteRequest, opts ...grpc.CallOption) (*UpsertRouteResponse, error)
-	// RemoveRoute succeeds even when the host has no route: `esb down` should
-	// still tear the sandbox down when only the route is already gone.
+	// RemoveRoute succeeds even when the host has no route: `usher down` should
+	// still tear the machine down when only the route is already gone.
 	RemoveRoute(ctx context.Context, in *RemoveRouteRequest, opts ...grpc.CallOption) (*RemoveRouteResponse, error)
-	RemoveSandboxRoutes(ctx context.Context, in *RemoveSandboxRoutesRequest, opts ...grpc.CallOption) (*RemoveSandboxRoutesResponse, error)
+	RemoveMachineRoutes(ctx context.Context, in *RemoveMachineRoutesRequest, opts ...grpc.CallOption) (*RemoveMachineRoutesResponse, error)
 }
 
 type routeServiceClient struct {
@@ -81,10 +81,10 @@ func (c *routeServiceClient) RemoveRoute(ctx context.Context, in *RemoveRouteReq
 	return out, nil
 }
 
-func (c *routeServiceClient) RemoveSandboxRoutes(ctx context.Context, in *RemoveSandboxRoutesRequest, opts ...grpc.CallOption) (*RemoveSandboxRoutesResponse, error) {
+func (c *routeServiceClient) RemoveMachineRoutes(ctx context.Context, in *RemoveMachineRoutesRequest, opts ...grpc.CallOption) (*RemoveMachineRoutesResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(RemoveSandboxRoutesResponse)
-	err := c.cc.Invoke(ctx, RouteService_RemoveSandboxRoutes_FullMethodName, in, out, cOpts...)
+	out := new(RemoveMachineRoutesResponse)
+	err := c.cc.Invoke(ctx, RouteService_RemoveMachineRoutes_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -97,10 +97,10 @@ func (c *routeServiceClient) RemoveSandboxRoutes(ctx context.Context, in *Remove
 type RouteServiceServer interface {
 	ListRoutes(context.Context, *ListRoutesRequest) (*ListRoutesResponse, error)
 	UpsertRoute(context.Context, *UpsertRouteRequest) (*UpsertRouteResponse, error)
-	// RemoveRoute succeeds even when the host has no route: `esb down` should
-	// still tear the sandbox down when only the route is already gone.
+	// RemoveRoute succeeds even when the host has no route: `usher down` should
+	// still tear the machine down when only the route is already gone.
 	RemoveRoute(context.Context, *RemoveRouteRequest) (*RemoveRouteResponse, error)
-	RemoveSandboxRoutes(context.Context, *RemoveSandboxRoutesRequest) (*RemoveSandboxRoutesResponse, error)
+	RemoveMachineRoutes(context.Context, *RemoveMachineRoutesRequest) (*RemoveMachineRoutesResponse, error)
 	mustEmbedUnimplementedRouteServiceServer()
 }
 
@@ -120,8 +120,8 @@ func (UnimplementedRouteServiceServer) UpsertRoute(context.Context, *UpsertRoute
 func (UnimplementedRouteServiceServer) RemoveRoute(context.Context, *RemoveRouteRequest) (*RemoveRouteResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RemoveRoute not implemented")
 }
-func (UnimplementedRouteServiceServer) RemoveSandboxRoutes(context.Context, *RemoveSandboxRoutesRequest) (*RemoveSandboxRoutesResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method RemoveSandboxRoutes not implemented")
+func (UnimplementedRouteServiceServer) RemoveMachineRoutes(context.Context, *RemoveMachineRoutesRequest) (*RemoveMachineRoutesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RemoveMachineRoutes not implemented")
 }
 func (UnimplementedRouteServiceServer) mustEmbedUnimplementedRouteServiceServer() {}
 func (UnimplementedRouteServiceServer) testEmbeddedByValue()                      {}
@@ -198,20 +198,20 @@ func _RouteService_RemoveRoute_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
-func _RouteService_RemoveSandboxRoutes_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(RemoveSandboxRoutesRequest)
+func _RouteService_RemoveMachineRoutes_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RemoveMachineRoutesRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(RouteServiceServer).RemoveSandboxRoutes(ctx, in)
+		return srv.(RouteServiceServer).RemoveMachineRoutes(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: RouteService_RemoveSandboxRoutes_FullMethodName,
+		FullMethod: RouteService_RemoveMachineRoutes_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(RouteServiceServer).RemoveSandboxRoutes(ctx, req.(*RemoveSandboxRoutesRequest))
+		return srv.(RouteServiceServer).RemoveMachineRoutes(ctx, req.(*RemoveMachineRoutesRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -220,7 +220,7 @@ func _RouteService_RemoveSandboxRoutes_Handler(srv interface{}, ctx context.Cont
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var RouteService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "esb.v1.RouteService",
+	ServiceName: "usher.v1.RouteService",
 	HandlerType: (*RouteServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
@@ -236,10 +236,10 @@ var RouteService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _RouteService_RemoveRoute_Handler,
 		},
 		{
-			MethodName: "RemoveSandboxRoutes",
-			Handler:    _RouteService_RemoveSandboxRoutes_Handler,
+			MethodName: "RemoveMachineRoutes",
+			Handler:    _RouteService_RemoveMachineRoutes_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "esb/v1/esb.proto",
+	Metadata: "usher/v1/usher.proto",
 }

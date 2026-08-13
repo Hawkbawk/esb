@@ -47,7 +47,7 @@ func query(t *testing.T, port int, name string, qtype uint16) *dns.Msg {
 }
 
 // Any label under the domain resolves to the loopback alias, including ones
-// no sandbox has claimed. Caddy's fallback handler answers those with a 404,
+// nothing has claimed. Caddy's fallback handler answers those with a 404,
 // which is a much better error than a DNS failure.
 func TestAnswersWildcardA(t *testing.T) {
 	port := start(t)

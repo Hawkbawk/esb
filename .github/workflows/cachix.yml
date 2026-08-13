@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   build-and-cache:
-    # esb is darwin-only for now (see flake.nix's `systems` list), so only
+    # usher is darwin-only for now (see flake.nix's `systems` list), so only
     # aarch64-darwin is built and cached. Add x86_64-darwin here if/when a
     # GitHub-hosted Intel Mac runner is available and it's actually needed.
     runs-on: macos-14
@@ -21,6 +21,6 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
       - uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71 # v17
         with:
-          name: hawkbawk-esb
+          name: hawkbawk-usher
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-      - run: nix build .#esb -L
+      - run: nix build .#usher -L

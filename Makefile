@@ -2,7 +2,7 @@
 
 default:
 	go generate ./...
-	go build -o esb .
+	go build -o usher .
 
 setup:
 	go mod download
@@ -22,4 +22,4 @@ lint:
 	staticcheck ./...
 
 bump-vendor-hash:
-	nix-update --flake esb --version skip
+	nix-update --flake usher --version skip

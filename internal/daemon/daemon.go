@@ -1,4 +1,4 @@
-// Package daemon runs the long-lived half of esb: the loopback alias, the DNS
+// Package daemon runs the long-lived half of usher: the loopback alias, the DNS
 // server for *.<domain>, Caddy on 443, and the gRPC API over a unix socket
 // that the CLI drives.
 package daemon
@@ -20,17 +20,17 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/hawkbawk/esb/internal/api"
-	"github.com/hawkbawk/esb/internal/api/esbv1"
-	"github.com/hawkbawk/esb/internal/config"
-	"github.com/hawkbawk/esb/internal/dnsd"
-	"github.com/hawkbawk/esb/internal/netalias"
-	"github.com/hawkbawk/esb/internal/proxy"
-	"github.com/hawkbawk/esb/internal/route"
+	"github.com/hawkbawk/usher/internal/api"
+	"github.com/hawkbawk/usher/internal/api/usherv1"
+	"github.com/hawkbawk/usher/internal/config"
+	"github.com/hawkbawk/usher/internal/dnsd"
+	"github.com/hawkbawk/usher/internal/netalias"
+	"github.com/hawkbawk/usher/internal/proxy"
+	"github.com/hawkbawk/usher/internal/route"
 )
 
 type Daemon struct {
-	esbv1.UnimplementedRouteServiceServer
+	usherv1.UnimplementedRouteServiceServer
 
 	cfg   *config.Config
 	store *route.Store
@@ -89,20 +89,20 @@ func Run(cfg *config.Config) error {
 		return err
 	}
 	srv := grpc.NewServer()
-	esbv1.RegisterRouteServiceServer(srv, d)
+	usherv1.RegisterRouteServiceServer(srv, d)
 	go func() {
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
-			log.Printf("esb: api server: %v", err)
+			log.Printf("usher: api server: %v", err)
 		}
 	}()
 
-	log.Printf("esb: serving *.%s on %s (dns port %d, %d route(s))",
+	log.Printf("usher: serving *.%s on %s (dns port %d, %d route(s))",
 		cfg.Domain, cfg.ListenAddress, cfg.DNSPort, len(store.List()))
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig
-	log.Print("esb: shutting down")
+	log.Print("usher: shutting down")
 
 	srv.GracefulStop()
 	return proxy.Stop()
@@ -132,45 +132,63 @@ func (d *Daemon) listen() (net.Listener, error) {
 	return ln, nil
 }
 
-func (d *Daemon) ListRoutes(_ context.Context, _ *esbv1.ListRoutesRequest) (*esbv1.ListRoutesResponse, error) {
+func (d *Daemon) ListRoutes(_ context.Context, _ *usherv1.ListRoutesRequest) (*usherv1.ListRoutesResponse, error) {
 	stored := d.store.List()
-	routes := make([]*esbv1.Route, 0, len(stored))
+	routes := make([]*usherv1.Route, 0, len(stored))
 	for _, r := range stored {
 		routes = append(routes, api.ToProto(r))
 	}
-	return &esbv1.ListRoutesResponse{Routes: routes}, nil
+	return &usherv1.ListRoutesResponse{Routes: routes}, nil
 }
 
-func (d *Daemon) UpsertRoute(_ context.Context, req *esbv1.UpsertRouteRequest) (*esbv1.UpsertRouteResponse, error) {
+func (d *Daemon) UpsertRoute(_ context.Context, req *usherv1.UpsertRouteRequest) (*usherv1.UpsertRouteResponse, error) {
 	host := route.Sanitize(req.GetHost())
 	if host == "" {
 		return nil, status.Errorf(codes.InvalidArgument, "%q does not sanitise to a usable hostname", req.GetHost())
 	}
-	sandbox := route.Sanitize(req.GetSandbox())
-	if sandbox == "" {
-		return nil, status.Errorf(codes.InvalidArgument, "%q does not sanitise to a usable sandbox name", req.GetSandbox())
+	adapter := api.AdapterFromProto(req.GetAdapter())
+	if adapter == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "unknown adapter %v", req.GetAdapter())
 	}
-	port := req.GetSandboxPort()
+	// Machine names are not sanitised: container and VM names legitimately
+	// contain characters a DNS label can't, and we never put one in a
+	// hostname. Only static routes may omit it.
+	machine := req.GetMachine()
+	if machine == "" && adapter != route.Static {
+		return nil, status.Errorf(codes.InvalidArgument, "the %s adapter needs a machine name", adapter)
+	}
+	port := req.GetMachinePort()
 	if port < 1 || port > 65535 {
-		return nil, status.Errorf(codes.InvalidArgument, "sandbox port %d out of range", port)
+		return nil, status.Errorf(codes.InvalidArgument, "port %d out of range", port)
+	}
+	hostPort := req.GetHostPort()
+	if hostPort > 65535 {
+		return nil, status.Errorf(codes.InvalidArgument, "host port %d out of range", hostPort)
 	}
 
 	d.applyMu.Lock()
 	defer d.applyMu.Unlock()
 
-	rt, err := d.store.Upsert(host, sandbox, int(port), d.cfg.PortMin, d.cfg.PortMax)
+	rt, err := d.store.Upsert(route.Route{
+		Host:        host,
+		Adapter:     adapter,
+		Machine:     machine,
+		MachinePort: int(port),
+		Upstream:    req.GetUpstream(),
+		HostPort:    int(hostPort),
+	}, d.cfg.PortMin, d.cfg.PortMax)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 	if err := d.applyLocked(); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
-	return &esbv1.UpsertRouteResponse{Route: api.ToProto(rt)}, nil
+	return &usherv1.UpsertRouteResponse{Route: api.ToProto(rt)}, nil
 }
 
-// RemoveRoute tolerates a host with no route: `esb down` should still tear
-// the sandbox down when only the route is already gone.
-func (d *Daemon) RemoveRoute(_ context.Context, req *esbv1.RemoveRouteRequest) (*esbv1.RemoveRouteResponse, error) {
+// RemoveRoute tolerates a host with no route: `usher down` should still tear
+// the machine down when only the route is already gone.
+func (d *Daemon) RemoveRoute(_ context.Context, req *usherv1.RemoveRouteRequest) (*usherv1.RemoveRouteResponse, error) {
 	host := route.Sanitize(req.GetHost())
 
 	d.applyMu.Lock()
@@ -184,31 +202,34 @@ func (d *Daemon) RemoveRoute(_ context.Context, req *esbv1.RemoveRouteRequest) (
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 	if !existed {
-		return &esbv1.RemoveRouteResponse{}, nil
+		return &usherv1.RemoveRouteResponse{}, nil
 	}
-	return &esbv1.RemoveRouteResponse{Route: api.ToProto(rt)}, nil
+	return &usherv1.RemoveRouteResponse{Route: api.ToProto(rt)}, nil
 }
 
-// RemoveSandboxRoutes tolerates a sandbox with no routes, for the same reason
+// RemoveMachineRoutes tolerates a machine with no routes, for the same reason
 // RemoveRoute does.
-func (d *Daemon) RemoveSandboxRoutes(_ context.Context, req *esbv1.RemoveSandboxRoutesRequest) (*esbv1.RemoveSandboxRoutesResponse, error) {
-	sandbox := route.Sanitize(req.GetSandbox())
+func (d *Daemon) RemoveMachineRoutes(_ context.Context, req *usherv1.RemoveMachineRoutesRequest) (*usherv1.RemoveMachineRoutesResponse, error) {
+	adapter := api.AdapterFromProto(req.GetAdapter())
+	if adapter == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "unknown adapter %v", req.GetAdapter())
+	}
 
 	d.applyMu.Lock()
 	defer d.applyMu.Unlock()
 
-	removed, err := d.store.RemoveSandbox(sandbox)
+	removed, err := d.store.RemoveMachine(adapter, req.GetMachine())
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 	if err := d.applyLocked(); err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
-	routes := make([]*esbv1.Route, 0, len(removed))
+	routes := make([]*usherv1.Route, 0, len(removed))
 	for _, r := range removed {
 		routes = append(routes, api.ToProto(r))
 	}
-	return &esbv1.RemoveSandboxRoutesResponse{Routes: routes}, nil
+	return &usherv1.RemoveMachineRoutesResponse{Routes: routes}, nil
 }
 
 func (d *Daemon) apply() error {
