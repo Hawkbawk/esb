@@ -161,7 +161,7 @@ in
     nix.settings = lib.mkIf cfg.useBinaryCache {
       substituters = [ "https://hawkbawk-usher.cachix.org" ];
       trusted-public-keys = [
-        "hawkbawk-usher.cachix.org-1:dXmAeKAaEubJoTJwHq/xeTyZNOM3i32V1cWoSuAGWt8="
+        "hawkbawk-usher.cachix.org-1:MKh5mptvVFF3z1om89aChHNbMOp/NoKCE32V709hFUY="
       ];
     };
 
