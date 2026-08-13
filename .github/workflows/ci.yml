@@ -11,9 +11,11 @@ jobs:
     # platform the package actually targets.
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v5
-      - uses: DeterminateSystems/nix-installer-action@main
-      - uses: DeterminateSystems/magic-nix-cache-action@main
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
+      - uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71 # v17
+        with:
+          name: hawkbawk-usher
       # doCheck is on for the usher package, and buildGoModule's default
       # checkPhase runs `go test ./...` (no subPackages set to narrow it), so
       # this also exercises the full test suite, including the

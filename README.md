@@ -32,16 +32,6 @@ browser / another machine
               `-- adapters: sbx, orbctl, the Docker API
 ```
 
-Four pieces are worth calling out.
-
-**Caddy is compiled in.** `internal/proxy` imports `caddy/v2` plus `github.com/caddy-dns/desec`, which is exactly what an [xcaddy](https://github.com/caddyserver/xcaddy) build generates. So this binary *is* the custom Caddy build. There's no second Caddy to install, and no risk of the CLI and the daemon disagreeing about which plugins are available.
-
-**There's no dnsmasq.** `internal/dnsd` is about 80 lines of `github.com/miekg/dns`. It answers A records for `*.<domain>` with the loopback alias and REFUSEs everything else. It never reads `/etc/resolv.conf` or `/etc/hosts`, so it can't accidentally turn into a general-purpose resolver.
-
-**The daemon owns the route table.** The CLI asks for changes over a unix socket instead of writing config fragments to a shared directory. That's why `usher up` needs no sudo, and why config generation and reloading happen in one place.
-
-**Adapters live entirely in the CLI.** The daemon stores a hostname, an upstream, and which adapter put it there — it never shells out to `sbx`, `orbctl`, or Docker itself. That keeps the privileged half small, and makes a new adapter one new file in `internal/adapter`.
-
 ## Adapters.
 
 | Adapter | A machine name means | How usher reaches it |
@@ -67,7 +57,7 @@ The docker adapter is reuse-only. Docker can't add a port binding to a running c
 | `usher daemon config` | Prints the Caddyfile the daemon would generate. Handy for debugging. |
 | `usher daemon install` / `uninstall` | Sets up the config, state dirs, resolver, and launchd job without nix. |
 
-A machine can have as many hostnames as you like, all at once — the proxy doesn't care. `usher down` only ever removes the one hostname you named; the machine and every other route pointing at it keep working.
+A machine can have as many hostnames as you like, all at once. `usher down` only ever removes the one hostname you named; the machine and every other route pointing at it keep working.
 
 Hostnames are sanitized into a single DNS label, because the wildcard cert covers `*.<domain>` and nothing deeper. So `feature/lti-fix` becomes `feature-lti-fix`, and `canvas.foo.<domain>` would not work. Machine names are left alone, since container and VM names legitimately contain characters a DNS label can't.
 
@@ -137,7 +127,7 @@ The nix-darwin module writes `/etc/usher/config.json`, which both halves read. S
 
 ## Notes on macOS.
 
-OrbStack already holds `*:443`, which is why Caddy binds a specific alias instead of the wildcard. macOS lets a specific-address bind coexist with an existing wildcard bind, so OrbStack's own `.orb.local` and `inst.test` routing keeps working.
+OrbStack already holds `*:443`, which is why Caddy binds a specific alias instead of the wildcard. macOS lets a specific-address bind coexist with an existing wildcard bind, so OrbStack's own `.orb.local` routing keeps working.
 
 The loopback alias doesn't survive a reboot and nothing else re-adds it, so the daemon creates it on every start and waits for the kernel to finish attaching it before binding anything.
 
@@ -150,5 +140,3 @@ nix develop      # go, gopls, staticcheck, nixfmt
 go test ./...
 nix build .#usher
 ```
-
-The test in `internal/proxy` renders the Caddyfile and runs it through Caddy's adapter, with one route per adapter kind. If the deSEC plugin import ever gets dropped, that fails at build time rather than the next time a cert needs renewing. `doCheck` is on in the derivation for the same reason.
