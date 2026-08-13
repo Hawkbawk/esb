@@ -50,6 +50,7 @@ alias, binds 443, and reads the deSEC token.`,
 	})
 
 	cmd.AddCommand(newDaemonInstallCmd())
+	cmd.AddCommand(newDaemonUninstallCmd())
 
 	return cmd
 }
