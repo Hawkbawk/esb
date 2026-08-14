@@ -1,0 +1,102 @@
+syntax = "proto3";
+
+// Package usher.v1 is the wire between the usher CLI and the usher daemon.
+//
+// The daemon owns the route table and the Caddy config; the CLI only asks it
+// for changes. That is why `usher up` needs no sudo and why there is no shared
+// directory of config fragments for the two halves to disagree about.
+package usher.v1;
+
+option go_package = "github.com/hawkbawk/usher/internal/api/usherv1;usherv1";
+
+// Adapter names the kind of thing a route points at. The CLI does all the
+// adapter-specific work before it ever calls the daemon; the daemon stores the
+// adapter only so `usher urls` and `usher down` know which one owns a route.
+enum Adapter {
+  ADAPTER_UNSPECIFIED = 0;
+  // A literal ip:port the user supplied. No machine to attach to.
+  ADAPTER_STATIC = 1;
+  // A Docker Sandbox microVM, reached through a published host port.
+  ADAPTER_SBX = 2;
+  // An OrbStack VM, reached by name at <machine>.orb.local.
+  ADAPTER_ORB = 3;
+  // A running container, reached through a port it already publishes.
+  ADAPTER_DOCKER = 4;
+}
+
+// Route is one hostname reachable at https://<host>.<domain>, forwarding to
+// upstream. A single machine can have many Routes (e.g. one per tenant in a
+// multi-tenant app that switches on Host), which is why the machine name is
+// carried on the route rather than being the route's key.
+message Route {
+  string host = 1;
+  Adapter adapter = 2;
+  // machine is the sandbox, VM, or container name. Empty for static routes.
+  string machine = 3;
+  // machine_port is the port the app listens on inside the machine.
+  uint32 machine_port = 4;
+  // upstream is exactly what Caddy dials, e.g. "127.0.0.1:31847" or
+  // "canvas.orb.local:3000".
+  string upstream = 5;
+  // host_port is non-zero only when a host port is involved. Routes that
+  // share an (adapter, machine, machine_port) triple share a host_port too,
+  // so a multi-tenant machine doesn't get the same port published twice.
+  uint32 host_port = 6;
+}
+
+message ListRoutesRequest {}
+
+message ListRoutesResponse {
+  repeated Route routes = 1;
+}
+
+// UpsertRouteRequest asks the daemon to route host somewhere.
+//
+// The caller fills in the dial target when it knows it. Static and orb routes
+// set upstream; the docker adapter sets host_port, having found a port the
+// container already publishes. The sbx adapter sets neither, because only the
+// daemon knows which ports its other routes already hold.
+message UpsertRouteRequest {
+  string host = 1;
+  Adapter adapter = 2;
+  string machine = 3;
+  uint32 machine_port = 4;
+  // upstream, when set, is used verbatim.
+  string upstream = 5;
+  // host_port, when set and upstream is empty, becomes 127.0.0.1:<host_port>.
+  uint32 host_port = 6;
+}
+
+message UpsertRouteResponse {
+  Route route = 1;
+}
+
+message RemoveRouteRequest {
+  string host = 1;
+}
+
+message RemoveRouteResponse {
+  // route is the route that was removed, unset if the host had no route.
+  Route route = 1;
+}
+
+// RemoveMachineRoutesRequest drops every route for a machine at once, e.g.
+// when the machine itself is being destroyed.
+message RemoveMachineRoutesRequest {
+  Adapter adapter = 1;
+  string machine = 2;
+}
+
+message RemoveMachineRoutesResponse {
+  // routes are the routes that were removed.
+  repeated Route routes = 1;
+}
+
+service RouteService {
+  rpc ListRoutes(ListRoutesRequest) returns (ListRoutesResponse);
+  rpc UpsertRoute(UpsertRouteRequest) returns (UpsertRouteResponse);
+  // RemoveRoute succeeds even when the host has no route: `usher down` should
+  // still tear the machine down when only the route is already gone.
+  rpc RemoveRoute(RemoveRouteRequest) returns (RemoveRouteResponse);
+  rpc RemoveMachineRoutes(RemoveMachineRoutesRequest) returns (RemoveMachineRoutesResponse);
+}

@@ -23,8 +23,8 @@ import (
 	// The deSEC DNS-01 solver, so `dns desec` resolves to a real module.
 	_ "github.com/caddy-dns/desec"
 
-	"github.com/hawkbawk/esb/internal/config"
-	"github.com/hawkbawk/esb/internal/route"
+	"github.com/hawkbawk/usher/internal/config"
+	"github.com/hawkbawk/usher/internal/route"
 )
 
 // LoadToken puts the deSEC API token in the environment, where the Caddyfile's
@@ -59,12 +59,12 @@ func Apply(cfg *config.Config, routes []route.Route) error {
 		return fmt.Errorf("caddyfile adapter not registered")
 	}
 
-	cfgJSON, warnings, err := adapter.Adapt([]byte(src), map[string]any{"filename": "esb.caddyfile"})
+	cfgJSON, warnings, err := adapter.Adapt([]byte(src), map[string]any{"filename": "usher.caddyfile"})
 	if err != nil {
 		return fmt.Errorf("adapting caddyfile: %w", err)
 	}
 	for _, w := range warnings {
-		fmt.Fprintf(os.Stderr, "esb: caddy warning: %s:%d %s\n", w.File, w.Line, w.Message)
+		fmt.Fprintf(os.Stderr, "usher: caddy warning: %s:%d %s\n", w.File, w.Line, w.Message)
 	}
 
 	if err := caddy.Load(cfgJSON, true); err != nil {

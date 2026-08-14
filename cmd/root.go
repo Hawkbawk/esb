@@ -1,4 +1,4 @@
-// Package cmd defines the esb command tree.
+// Package cmd defines the usher command tree.
 package cmd
 
 import (
@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/hawkbawk/esb/internal/api"
-	"github.com/hawkbawk/esb/internal/config"
+	"github.com/hawkbawk/usher/internal/api"
+	"github.com/hawkbawk/usher/internal/config"
 )
 
 // version is set at build time via -ldflags.
@@ -16,19 +16,18 @@ var version = "dev"
 
 func Execute() {
 	root := &cobra.Command{
-		Use:   "esb",
-		Short: "Extended sandbox: name-based HTTPS routing for Docker Sandboxes",
-		Long: `esb gives every Docker Sandbox a real hostname.
+		Use:   "usher",
+		Short: "Real HTTPS hostnames for local machines",
+		Long: `usher gives anything running locally a real hostname.
 
-Sandboxes are microVMs, not containers, so they can't share a Docker network.
-Each one publishes its app to a host port, which gives you ugly localhost:31847
-URLs and no way for two sandboxes to reach each other over verifiable HTTPS.
+A sandbox, an OrbStack VM, a container, or a bare ip:port becomes reachable at
+https://<hostname>.<domain>, behind a publicly trusted wildcard cert from
+Let's Encrypt via a DNS-01 challenge against deSEC. Because the cert is
+publicly trusted, there is no CA to install anywhere, so calls between your
+machines verify without disabling TLS checks.
 
-esb runs a DNS server and a Caddy proxy that together make every sandbox
-reachable at https://<label>.<domain>, with a publicly trusted wildcard cert
-from Let's Encrypt via a DNS-01 challenge against deSEC. Because the cert is
-publicly trusted, there is no CA to install in the host or in any sandbox
-image, so cross-sandbox calls verify without disabling TLS checks.`,
+usher runs a DNS server and a Caddy proxy to do it, and never creates or manages
+the machines themselves.`,
 		Version:       version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -36,15 +35,13 @@ image, so cross-sandbox calls verify without disabling TLS checks.`,
 
 	root.AddCommand(
 		newUpCmd(),
-		newRouteCmd(),
 		newDownCmd(),
 		newURLsCmd(),
-		newFromTemplateCmd(),
 		newDaemonCmd(),
 	)
 
 	if err := root.Execute(); err != nil {
-		fmt.Fprintf(os.Stderr, "esb: %v\n", err)
+		fmt.Fprintf(os.Stderr, "usher: %v\n", err)
 		os.Exit(1)
 	}
 }

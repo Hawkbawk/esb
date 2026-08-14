@@ -1,4 +1,4 @@
-// Package config loads the host-wide esb settings.
+// Package config loads the host-wide usher settings.
 //
 // The file is written by the nix darwin module so that the daemon and the CLI
 // agree on the domain, the loopback alias, and where state lives. Nothing here
@@ -11,14 +11,15 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"os"
 	"path/filepath"
 )
 
 // DefaultPath is where the darwin module drops the generated config.
-const DefaultPath = "/etc/esb/config.json"
+const DefaultPath = "/etc/usher/config.json"
 
-// Config holds the host-wide esb settings. It should never be constructed
+// Config holds the host-wide usher settings. It should never be constructed
 // directly; use Load() instead.
 type Config struct {
 	// Domain that sandbox hostnames live directly under, so a sandbox
@@ -29,7 +30,7 @@ type Config struct {
 
 	// ListenAddress is the loopback alias that `<label>.<domain>` resolves to
 	// and that Caddy binds 443 on.
-	ListenAddress string `json:"listenAddress"`
+	ListenAddress net.IP `json:"listenAddress"`
 
 	// DNSPort is not 53, because /etc/resolver files can name a port and
 	// binding 53 would fight with everything else on the machine.
@@ -46,14 +47,14 @@ type Config struct {
 }
 
 func (c *Config) applyDefaults() {
-	if c.ListenAddress == "" {
-		c.ListenAddress = "192.168.255.253"
+	if c.ListenAddress == nil {
+		c.ListenAddress = net.IPv4(192, 168, 255, 253)
 	}
 	if c.DNSPort == 0 {
 		c.DNSPort = 19353
 	}
 	if c.StateDir == "" {
-		c.StateDir = "/usr/local/var/esb"
+		c.StateDir = "/usr/local/var/usher"
 	}
 	if c.PortMin == 0 {
 		c.PortMin = 30000
@@ -75,7 +76,7 @@ func (c *Config) validate() error {
 
 // SocketPath is the unix socket the CLI uses to talk to the daemon. It lives
 // under the state dir so a single chown at activation covers it.
-func (c *Config) SocketPath() string { return filepath.Join(c.StateDir, "esb.sock") }
+func (c *Config) SocketPath() string { return filepath.Join(c.StateDir, "usher.sock") }
 
 // CaddyStorageDir holds ACME account keys and the wildcard cert.
 func (c *Config) CaddyStorageDir() string { return filepath.Join(c.StateDir, "caddy") }
@@ -83,17 +84,17 @@ func (c *Config) CaddyStorageDir() string { return filepath.Join(c.StateDir, "ca
 // RoutesPath is the daemon's persisted route table.
 func (c *Config) RoutesPath() string { return filepath.Join(c.StateDir, "routes.json") }
 
-// Path resolves the config location: $ESB_CONFIG wins, then the system file,
+// Path resolves the config location: $USHER_CONFIG wins, then the system file,
 // then a per-user file for people not using the darwin module.
 func Path() string {
-	if p := os.Getenv("ESB_CONFIG"); p != "" {
+	if p := os.Getenv("USHER_CONFIG"); p != "" {
 		return p
 	}
 	if _, err := os.Stat(DefaultPath); err == nil {
 		return DefaultPath
 	}
 	if config, err := os.UserConfigDir(); err == nil {
-		return filepath.Join(config, "esb", "config.json")
+		return filepath.Join(config, "usher", "config.json")
 	}
 	return DefaultPath
 }
@@ -105,7 +106,7 @@ func Load() (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return nil, fmt.Errorf("no esb config at %s\nEnable services.esb in your nix-darwin configuration and rebuild, or set $ESB_CONFIG", path)
+			return nil, fmt.Errorf("no usher config at %s\nEnable services.usher in your nix-darwin configuration and rebuild, or set $USHER_CONFIG", path)
 		}
 		return nil, err
 	}

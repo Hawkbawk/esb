@@ -5,46 +5,105 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/hawkbawk/esb/internal/route"
-	"github.com/hawkbawk/esb/internal/sbx"
+	"github.com/hawkbawk/usher/internal/adapter"
+	"github.com/hawkbawk/usher/internal/api"
+	"github.com/hawkbawk/usher/internal/route"
 )
 
 func newDownCmd() *cobra.Command {
-	var keepSandbox bool
+	var destroy bool
 
 	cmd := &cobra.Command{
-		Use:   "down <label>",
-		Short: "Remove a sandbox and its routes",
-		Args:  cobra.ExactArgs(1),
+		Use:   "down <hostname>",
+		Short: "Remove a hostname's route",
+		Long: `Remove a hostname's route.
+
+Only that hostname goes away. Other hostnames pointing at the same machine keep
+working, and the machine itself is left alone.
+
+Pass --destroy to also tear down the machine and every other route pointing at
+it. That works for sbx and docker machines; usher refuses to delete an OrbStack
+VM, since that's rarely what you meant.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			hostname, err := sanitizeHostname(args[0])
+			if err != nil {
+				return err
+			}
+
 			_, client, err := load()
 			if err != nil {
 				return err
 			}
-			label := route.Sanitize(args[0])
+			defer client.Close()
 
-			// The sandbox may have accumulated routes for several hostnames
-			// (e.g. one per tenant), so tearing it down has to drop all of
-			// them, not just one sharing its name.
-			if _, err := client.RemoveSandbox(label); err != nil {
+			r, existed, err := client.Remove(hostname)
+			if err != nil {
 				return err
 			}
-			if keepSandbox {
-				fmt.Printf("removed the routes for %q; the sandbox is still running\n", label)
-				return nil
+			if !existed {
+				return fmt.Errorf("no route named %q (see `usher urls`)", hostname)
 			}
 
-			// The sandbox may already be gone, which is fine: the route is
-			// what this command really owns.
-			if err := sbx.Run("rm", "--force", label); err != nil {
-				fmt.Printf("removed the routes for %q; sandbox removal reported: %v\n", label, err)
+			a, err := adapter.For(r.Adapter)
+			if err != nil {
+				return err
+			}
+
+			stillUsed, err := machinePortStillRouted(client, r)
+			if err != nil {
+				return err
+			}
+			if err := a.Detach(cmd.Context(), r, stillUsed); err != nil {
+				return err
+			}
+			fmt.Printf("removed %s\n", hostname)
+
+			if !destroy {
 				return nil
 			}
-			fmt.Printf("removed sandbox %q and its routes\n", label)
-			return nil
+			return destroyMachine(cmd, client, a, r)
 		},
 	}
 
-	cmd.Flags().BoolVar(&keepSandbox, "keep-sandbox", false, "remove the route but leave the sandbox running")
+	cmd.Flags().BoolVar(&destroy, "destroy", false,
+		"also remove the machine and every other route pointing at it")
 	return cmd
+}
+
+// destroyMachine drops the machine's remaining routes before removing the
+// machine, so nothing is left pointing at something that no longer exists.
+func destroyMachine(cmd *cobra.Command, client *api.Client, a adapter.Adapter, r route.Route) error {
+	if r.Adapter == route.Static {
+		return fmt.Errorf("--destroy has nothing to do for a static route")
+	}
+
+	orphans, err := client.RemoveMachine(r.Adapter, r.Machine)
+	if err != nil {
+		return err
+	}
+	for _, o := range orphans {
+		fmt.Printf("removed %s\n", o.Host)
+	}
+
+	if err := a.Destroy(cmd.Context(), r.Machine); err != nil {
+		return err
+	}
+	fmt.Printf("destroyed %s %s\n", r.Adapter, r.Machine)
+	return nil
+}
+
+// machinePortStillRouted reports whether another hostname still points at the
+// same machine port, in which case its published host port has to stay.
+func machinePortStillRouted(client *api.Client, r route.Route) (bool, error) {
+	routes, err := client.List()
+	if err != nil {
+		return false, err
+	}
+	for _, other := range routes {
+		if other.SameMachine(r) {
+			return true, nil
+		}
+	}
+	return false, nil
 }

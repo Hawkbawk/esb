@@ -1,0 +1,53 @@
+package adapter
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/hawkbawk/usher/internal/route"
+	"github.com/hawkbawk/usher/internal/sbx"
+)
+
+// Sbx routes to a Docker Sandbox microVM.
+//
+// Sandboxes are microVMs, not containers, so they can't share a Docker network
+// with the host. The only way in is a published host port, which is why this
+// is the one adapter that needs the daemon to pick a port before it can act.
+type Sbx struct{}
+
+func (Sbx) Kind() route.Adapter { return route.Sbx }
+
+func (Sbx) Attach(_ context.Context, machine string, port int) (route.Route, error) {
+	exists, err := sbx.Exists(machine)
+	if err != nil {
+		return route.Route{}, err
+	}
+	if !exists {
+		return route.Route{}, fmt.Errorf("no sandbox named %q (see `sbx ls`)", machine)
+	}
+	// No upstream and no host port: the daemon allocates.
+	return route.Route{
+		Adapter:     route.Sbx,
+		Machine:     machine,
+		MachinePort: port,
+	}, nil
+}
+
+func (Sbx) Publish(_ context.Context, r route.Route) error {
+	return sbx.Run("ports", r.Machine,
+		"--publish", fmt.Sprintf("127.0.0.1:%d:%d", r.HostPort, r.MachinePort))
+}
+
+func (Sbx) Detach(_ context.Context, r route.Route, portStillUsed bool) error {
+	if portStillUsed {
+		// Another hostname points at the same sandbox port and still needs the
+		// publish.
+		return nil
+	}
+	return sbx.Run("ports", r.Machine,
+		"--unpublish", fmt.Sprintf("127.0.0.1:%d:%d", r.HostPort, r.MachinePort))
+}
+
+func (Sbx) Destroy(_ context.Context, machine string) error {
+	return sbx.Run("rm", "--force", machine)
+}

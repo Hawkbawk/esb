@@ -1,0 +1,26 @@
+schemaVersion: "2"
+kind: mixin
+name: usher-networking
+version: 1.0.0
+displayName: usher networking
+description: Explains how sandboxes routed by usher are reached, so the agent binds its app to the right interface.
+agentInstructions:
+  content: |
+    This sandbox is routed by usher (https://github.com/hawkbawk/usher). usher gives
+    it a real hostname behind a trusted HTTPS certificate, proxied through a
+    published host port:
+
+        https://<hostname>.<domain>  ->  Caddy on the host  ->  a published port in this sandbox
+
+    For your app to actually be reachable, **bind to `0.0.0.0`, not
+    `127.0.0.1` or `localhost`.** The host port forward reaches your app
+    through the sandbox's network interface, not its loopback. A server bound
+    only to loopback inside the sandbox is unreachable from outside it even
+    though the port mapping looks correct.
+
+    Whoever ran `usher up` chose which port to route. If you change the port
+    your app listens on, that route stops working until they re-run it.
+
+    The URL is real, publicly-trusted HTTPS — no self-signed cert to trust
+    and no need to disable TLS verification when calling it from a browser or
+    from another sandbox.

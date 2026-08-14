@@ -1,5 +1,5 @@
 {
-  description = "esb - extended sandbox: name-based HTTPS routing for Docker Sandbox microVMs";
+  description = "usher - real HTTPS hostnames for local machines";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
@@ -15,61 +15,63 @@
       ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
 
-      mkEsb =
+      mkUsher =
         { lib, buildGoModule }:
         buildGoModule (finalAttrs: {
-          pname = "esb";
+          pname = "usher";
           version = "0.1.0";
 
           src = lib.cleanSource ./.;
 
-          vendorHash = "sha256-LrUnpzGu8oPoq1SxHgWVylEryRmcMPCJvAnGGir33fk=";
+          vendorHash = "sha256-94TNz7iYJzDLLPbJjz+g40iQ2FP9mYwa6QqDQC4LkEo=";
 
           ldflags = [
             "-s"
             "-w"
-            "-X=github.com/hawkbawk/esb/cmd.version=${finalAttrs.version}"
+            "-X=github.com/hawkbawk/usher/cmd.version=${finalAttrs.version}"
           ];
 
           # The Caddyfile adapter test is what proves the deSEC plugin is still wired
           # up, so it is worth paying for on every build.
           doCheck = true;
 
-          # Deliberately not wrapped with a PATH: esb shells out to `sbx`, `docker`,
-          # and `git`, all of which come from Homebrew or Docker Desktop on this
-          # machine. Pinning them to nixpkgs copies would find the wrong binaries.
+          # Deliberately not wrapped with a PATH: usher shells out to `sbx` and
+          # `orbctl`, which come from Homebrew or OrbStack on this machine.
+          # Pinning them to nixpkgs copies would find the wrong binaries.
 
           meta = {
-            description = "Name-based HTTPS routing for Docker Sandbox microVMs";
+            description = "Real HTTPS hostnames for sandboxes, VMs, containers, and bare ports";
             longDescription = ''
-              esb (extended sandbox) gives every Docker Sandbox a real hostname behind
-              a publicly trusted wildcard certificate. It embeds Caddy with the deSEC
-              DNS-01 provider and a minimal authoritative DNS server, so there is no
-              separate Caddy build and no dnsmasq to install.
+              usher shows every request to the right door. It gives anything running
+              locally a real hostname
+              behind a publicly trusted wildcard certificate: a Docker Sandbox, an
+              OrbStack VM, a container, or a bare ip:port. It embeds Caddy with the
+              deSEC DNS-01 provider and a minimal authoritative DNS server, so there
+              is no separate Caddy build and no dnsmasq to install.
             '';
-            homepage = "https://github.com/hawkbawk/esb";
+            homepage = "https://github.com/hawkbawk/usher";
             license = lib.licenses.mit;
-            mainProgram = "esb";
+            mainProgram = "usher";
             platforms = lib.platforms.darwin;
           };
         });
     in
     {
       packages = forAllSystems (pkgs: rec {
-        esb = pkgs.callPackage mkEsb { };
-        default = esb;
+        usher = pkgs.callPackage mkUsher { };
+        default = usher;
       });
 
       overlays.default = final: _prev: {
-        esb = final.callPackage mkEsb { };
+        usher = final.callPackage mkUsher { };
       };
 
       # The CLI half. Installs the binary for a user.
-      homeModules.esb = import ./nix/home-module.nix self;
+      homeModules.usher = import ./nix/home-module.nix self;
 
       # The daemon half. Needs root to bind 443, add the loopback alias, and
       # write /etc/resolver, so it cannot live in home-manager.
-      darwinModules.esb = import ./nix/darwin-module.nix self;
+      darwinModules.usher = import ./nix/darwin-module.nix self;
 
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
@@ -81,7 +83,7 @@
             pkgs.nix-update
 
             # For `go generate ./...`, which regenerates the daemon API stubs
-            # from proto/esb/v1/esb.proto. The generated .pb.go files are
+            # from proto/usher/v1/usher.proto. The generated .pb.go files are
             # checked in, so a plain `nix build` never needs these.
             pkgs.protobuf
             pkgs.protoc-gen-go
